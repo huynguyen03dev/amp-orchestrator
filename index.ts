@@ -1,16 +1,16 @@
-// @amp-agent-mode {"key":"lead-gpt","label":"SLP - Lead GPT Luna","color":"#d97706"}
-// @amp-agent-mode {"key":"lead-deepseek","label":"SLP - Lead DeepSeek","color":"#d97706"}
-// @amp-agent-mode {"key":"lead-glm","label":"SLP - Lead GLM 5.3","color":"#d97706"}
-// @amp-agent-mode {"key":"lead-glm-flash","label":"SLP - Lead GLM Flash","color":"#d97706"}
-// @amp-agent-mode {"key":"lead-sol","label":"SLP - Lead GPT-6.1 Sol","color":"#d97706"}
-// @amp-agent-mode {"key":"peer-gpt","label":"SLP - Peer GPT Luna","color":"#2563eb"}
-// @amp-agent-mode {"key":"peer-deepseek","label":"SLP - Peer DeepSeek","color":"#2563eb"}
-// @amp-agent-mode {"key":"peer-glm","label":"SLP - Peer GLM 5.3","color":"#2563eb"}
-// @amp-agent-mode {"key":"peer-glm-flash","label":"SLP - Peer GLM Flash","color":"#2563eb"}
-// @amp-agent-mode {"key":"supervisor-gpt","label":"SLP - Sup GPT Luna","color":"#64748b"}
-// @amp-agent-mode {"key":"supervisor-deepseek","label":"SLP - Sup DeepSeek","color":"#64748b"}
-// @amp-agent-mode {"key":"supervisor-glm","label":"SLP - Sup GLM 5.3","color":"#64748b"}
-// @amp-agent-mode {"key":"supervisor-glm-flash","label":"SLP - Sup GLM Flash","color":"#64748b"}
+// @amp-agent-mode {"key":"lead-gpt","label":"SLP/Lead GPT Luna","color":"#d97706"}
+// @amp-agent-mode {"key":"lead-deepseek","label":"SLP/Lead DeepSeek","color":"#d97706"}
+// @amp-agent-mode {"key":"lead-glm","label":"SLP/Lead GLM 5.3","color":"#d97706"}
+// @amp-agent-mode {"key":"lead-glm-flash","label":"SLP/Lead GLM Flash","color":"#d97706"}
+// @amp-agent-mode {"key":"lead-sol","label":"SLP/Lead GPT-6.1 Sol","color":"#d97706"}
+// @amp-agent-mode {"key":"peer-gpt","label":"SLP/Peer GPT Luna","color":"#2563eb"}
+// @amp-agent-mode {"key":"peer-deepseek","label":"SLP/Peer DeepSeek","color":"#2563eb"}
+// @amp-agent-mode {"key":"peer-glm","label":"SLP/Peer GLM 5.3","color":"#2563eb"}
+// @amp-agent-mode {"key":"peer-glm-flash","label":"SLP/Peer GLM Flash","color":"#2563eb"}
+// @amp-agent-mode {"key":"supervisor-gpt","label":"SLP/Sup GPT Luna","color":"#64748b"}
+// @amp-agent-mode {"key":"supervisor-deepseek","label":"SLP/Sup DeepSeek","color":"#64748b"}
+// @amp-agent-mode {"key":"supervisor-glm","label":"SLP/Sup GLM 5.3","color":"#64748b"}
+// @amp-agent-mode {"key":"supervisor-glm-flash","label":"SLP/Sup GLM Flash","color":"#64748b"}
 import { readFileSync } from 'node:fs'
 import type {
 	Agent,
@@ -33,7 +33,7 @@ import { judge, readTurn } from './lib/watchdog'
 const PLUGIN_NAME = 'amp-orchestrator'
 const ORCHESTRATOR_TOOLS = `plugin__${PLUGIN_NAME}__*`
 /** Visible prefix on every orchestration mode, so they filter together. */
-const MODE_PREFIX = 'SLP - '
+const MODE_PREFIX = 'SLP/'
 const tool = (name: string): string => `plugin__${PLUGIN_NAME}__${name}`
 
 /** Read/inspect tools both the Lead and the Supervisor get. */
