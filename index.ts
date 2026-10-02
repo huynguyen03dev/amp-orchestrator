@@ -58,6 +58,8 @@ interface ModelSpec {
 	short: string
 	/** Roles this model is available for. Omit for every role. */
 	roles?: readonly string[]
+	/** Reasoning effort override for this model. Omit to use the role's effort. */
+	effort?: AgentReasoningEffort
 }
 
 /** A role every model can be pinned to. */
@@ -80,8 +82,14 @@ const MODELS: ModelSpec[] = [
 	{ slug: 'deepseek', model: 'deepseek/deepseek-v4.1-flash', short: 'DeepSeek' },
 	{ slug: 'glm', model: 'zhipuai/glm-5.3', short: 'GLM 5.3' },
 	{ slug: 'glm-flash', model: 'zhipuai/glm-5.3-flash', short: 'GLM Flash' },
-	// Expensive: reserve it for the Lead role only.
-	{ slug: 'sol', model: 'openai/gpt-6.1-sol', short: 'GPT-6.1 Sol', roles: ['lead'] },
+	// Expensive: reserve it for the Lead role only, and keep effort low — it is strong as-is.
+	{
+		slug: 'sol',
+		model: 'openai/gpt-6.1-sol',
+		short: 'GPT-6.1 Sol',
+		roles: ['lead'],
+		effort: 'low',
+	},
 ]
 
 /**
@@ -178,7 +186,7 @@ export default function (amp: PluginAPI) {
 				model: model.model,
 				instructions: role.instructions,
 				tools: role.tools,
-				reasoningEffort: role.effort,
+				reasoningEffort: model.effort ?? role.effort,
 				display: { label, color: role.color },
 			})
 			amp.registerAgentMode({

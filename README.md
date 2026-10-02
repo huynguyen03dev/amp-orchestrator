@@ -62,10 +62,11 @@ Models:
 | `deepseek` | `deepseek/deepseek-v4.1-flash` | Lead `max` · Peer/Supervisor `high` |
 | `glm` | `zhipuai/glm-5.3` | Lead `max` · Peer/Supervisor `high` |
 | `glm-flash` | `zhipuai/glm-5.3-flash` | Lead `max` · Peer/Supervisor `high` |
-| `sol` | `openai/gpt-6.1-sol` | Lead `max` — **Lead only** (expensive) |
+| `sol` | `openai/gpt-6.1-sol` | Lead `low` — **Lead only** (expensive) |
 
-A model may be restricted to some roles with a `roles` list on its `MODELS` entry;
-`sol` is Lead-only, so it has no Peer or Supervisor mode and `peer_spawn` never
+A model may be restricted to some roles with a `roles` list, and override the
+role's reasoning effort with `effort`, on its `MODELS` entry. `sol` is Lead-only
+at `low` effort, so it has no Peer or Supervisor mode and `peer_spawn` never
 offers it.
 
 ### Tools
