@@ -50,7 +50,7 @@ Every role is registered once per model. Keys are `<role>-<model>`; labels are
 
 | Role | Keys | Extends | Purpose |
 | --- | --- | --- | --- |
-| Lead | `lead-gpt`, `lead-deepseek`, `lead-glm`, `lead-glm-flash` | `high` | Framing, routing, integration, verification, acceptance. |
+| Lead | `lead-gpt`, `lead-deepseek`, `lead-glm`, `lead-glm-flash`, `lead-sol` | `high` | Framing, routing, integration, verification, acceptance. |
 | Peer | `peer-gpt`, `peer-deepseek`, `peer-glm`, `peer-glm-flash` | `medium` | Owns one bounded outcome; reports evidence. |
 | Supervisor | `supervisor-gpt`, `supervisor-deepseek`, `supervisor-glm`, `supervisor-glm-flash` | `medium` | Advisory delivery-quality observation; no project ownership. |
 
@@ -62,6 +62,11 @@ Models:
 | `deepseek` | `deepseek/deepseek-v4.1-flash` | Lead `max` · Peer/Supervisor `high` |
 | `glm` | `zhipuai/glm-5.3` | Lead `max` · Peer/Supervisor `high` |
 | `glm-flash` | `zhipuai/glm-5.3-flash` | Lead `max` · Peer/Supervisor `high` |
+| `sol` | `openai/gpt-6.1-sol` | Lead `max` — **Lead only** (expensive) |
+
+A model may be restricted to some roles with a `roles` list on its `MODELS` entry;
+`sol` is Lead-only, so it has no Peer or Supervisor mode and `peer_spawn` never
+offers it.
 
 ### Tools
 

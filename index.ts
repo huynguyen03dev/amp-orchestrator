@@ -2,6 +2,7 @@
 // @amp-agent-mode {"key":"lead-deepseek","label":"SLP - Lead DeepSeek","color":"#d97706"}
 // @amp-agent-mode {"key":"lead-glm","label":"SLP - Lead GLM 5.3","color":"#d97706"}
 // @amp-agent-mode {"key":"lead-glm-flash","label":"SLP - Lead GLM Flash","color":"#d97706"}
+// @amp-agent-mode {"key":"lead-sol","label":"SLP - Lead GPT-6.1 Sol","color":"#d97706"}
 // @amp-agent-mode {"key":"peer-gpt","label":"SLP - Peer GPT Luna","color":"#2563eb"}
 // @amp-agent-mode {"key":"peer-deepseek","label":"SLP - Peer DeepSeek","color":"#2563eb"}
 // @amp-agent-mode {"key":"peer-glm","label":"SLP - Peer GLM 5.3","color":"#2563eb"}
@@ -55,6 +56,8 @@ interface ModelSpec {
 	slug: string
 	model: string
 	short: string
+	/** Roles this model is available for. Omit for every role. */
+	roles?: readonly string[]
 }
 
 /** A role every model can be pinned to. */
@@ -77,6 +80,8 @@ const MODELS: ModelSpec[] = [
 	{ slug: 'deepseek', model: 'deepseek/deepseek-v4.1-flash', short: 'DeepSeek' },
 	{ slug: 'glm', model: 'zhipuai/glm-5.3', short: 'GLM 5.3' },
 	{ slug: 'glm-flash', model: 'zhipuai/glm-5.3-flash', short: 'GLM Flash' },
+	// Expensive: reserve it for the Lead role only.
+	{ slug: 'sol', model: 'openai/gpt-6.1-sol', short: 'GPT-6.1 Sol', roles: ['lead'] },
 ]
 
 /**
@@ -158,12 +163,14 @@ export default function (amp: PluginAPI) {
 		workspaceRoot ? amp.helpers.filePathFromURI(workspaceRoot) : null,
 	)
 
-	// ── Modes: every model × every role ──────────────────────────────────────
+	// ── Modes: every model × every role it is allowed for ────────────────────
 	// One agent handle per `<role>-<model>`, used by the spawn tools.
 	const agents = new Map<string, Agent>()
+	const modelsByRole = new Map<string, string[]>()
 
 	for (const model of MODELS) {
 		for (const role of ROLES) {
+			if (model.roles && !model.roles.includes(role.slug)) continue
 			const key = `${role.slug}-${model.slug}`
 			const label = `${MODE_PREFIX}${role.short} ${model.short}`
 			const agent = amp.createAgent({
@@ -182,10 +189,12 @@ export default function (amp: PluginAPI) {
 				agent: agent.definition,
 			})
 			agents.set(key, agent)
+			modelsByRole.set(role.slug, [...(modelsByRole.get(role.slug) ?? []), model.slug])
 		}
 	}
 
-	const modelSlugs = MODELS.map((m) => m.slug)
+	/** Model slugs allowed for a role, in `MODELS` order. */
+	const modelsFor = (roleSlug: string): string[] => modelsByRole.get(roleSlug) ?? []
 
 	/** Shared spawn: create a thread for `<role>-<model>` and send it the brief. */
 	async function spawn(
@@ -193,7 +202,8 @@ export default function (amp: PluginAPI) {
 		input: Record<string, unknown>,
 		ctx: PluginToolContext,
 	): Promise<string> {
-		const modelSlug = str(input, 'model') || modelSlugs[0]
+		const roleModels = modelsFor(roleSlug)
+		const modelSlug = str(input, 'model') || roleModels[0]
 		const name = str(input, 'name')
 		const brief = str(input, 'brief')
 		const disposition = str(input, 'disposition') || (roleSlug === 'lead' ? 'Lead' : 'Engineer')
@@ -203,7 +213,7 @@ export default function (amp: PluginAPI) {
 		const agent = agents.get(`${roleSlug}-${modelSlug}`)
 		if (!agent) {
 			throw new Error(
-				`Unknown model "${modelSlug}". Models: ${modelSlugs.join(', ')}.`,
+				`Unknown model "${modelSlug}" for role ${roleSlug}. Models: ${roleModels.join(', ')}.`,
 			)
 		}
 
@@ -260,8 +270,8 @@ export default function (amp: PluginAPI) {
 				},
 				model: {
 					type: 'string',
-					enum: modelSlugs,
-					description: `Model for the peer. One of: ${modelSlugs.join(', ')}. Defaults to "${modelSlugs[0]}".`,
+					enum: modelsFor('peer'),
+					description: `Model for the peer. One of: ${modelsFor('peer').join(', ')}. Defaults to "${modelsFor('peer')[0]}".`,
 				},
 			},
 			required: ['name', 'disposition', 'brief'],
@@ -286,8 +296,8 @@ export default function (amp: PluginAPI) {
 				},
 				model: {
 					type: 'string',
-					enum: modelSlugs,
-					description: `Model for the new Lead. One of: ${modelSlugs.join(', ')}. Defaults to "${modelSlugs[0]}".`,
+					enum: modelsFor('lead'),
+					description: `Model for the new Lead. One of: ${modelsFor('lead').join(', ')}. Defaults to "${modelsFor('lead')[0]}".`,
 				},
 			},
 			required: ['name', 'brief'],
