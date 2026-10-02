@@ -1,26 +1,28 @@
-// @amp-agent-mode {"key":"lead-gpt","label":"Lead - GPT Luna","color":"#d97706"}
-// @amp-agent-mode {"key":"lead-deepseek","label":"Lead - DeepSeek","color":"#d97706"}
-// @amp-agent-mode {"key":"lead-glm","label":"Lead - GLM 5.3","color":"#d97706"}
-// @amp-agent-mode {"key":"lead-glm-flash","label":"Lead - GLM Flash","color":"#d97706"}
-// @amp-agent-mode {"key":"peer-gpt","label":"Peer - GPT Luna","color":"#2563eb"}
-// @amp-agent-mode {"key":"peer-deepseek","label":"Peer - DeepSeek","color":"#2563eb"}
-// @amp-agent-mode {"key":"peer-glm","label":"Peer - GLM 5.3","color":"#2563eb"}
-// @amp-agent-mode {"key":"peer-glm-flash","label":"Peer - GLM Flash","color":"#2563eb"}
-// @amp-agent-mode {"key":"supervisor-gpt","label":"Supervisor - GPT Luna","color":"#64748b"}
-// @amp-agent-mode {"key":"supervisor-deepseek","label":"Supervisor - DeepSeek","color":"#64748b"}
-// @amp-agent-mode {"key":"supervisor-glm","label":"Supervisor - GLM 5.3","color":"#64748b"}
-// @amp-agent-mode {"key":"supervisor-glm-flash","label":"Supervisor - GLM Flash","color":"#64748b"}
+// @amp-agent-mode {"key":"lead-gpt","label":"SLP - Lead GPT Luna","color":"#d97706"}
+// @amp-agent-mode {"key":"lead-deepseek","label":"SLP - Lead DeepSeek","color":"#d97706"}
+// @amp-agent-mode {"key":"lead-glm","label":"SLP - Lead GLM 5.3","color":"#d97706"}
+// @amp-agent-mode {"key":"lead-glm-flash","label":"SLP - Lead GLM Flash","color":"#d97706"}
+// @amp-agent-mode {"key":"peer-gpt","label":"SLP - Peer GPT Luna","color":"#2563eb"}
+// @amp-agent-mode {"key":"peer-deepseek","label":"SLP - Peer DeepSeek","color":"#2563eb"}
+// @amp-agent-mode {"key":"peer-glm","label":"SLP - Peer GLM 5.3","color":"#2563eb"}
+// @amp-agent-mode {"key":"peer-glm-flash","label":"SLP - Peer GLM Flash","color":"#2563eb"}
+// @amp-agent-mode {"key":"supervisor-gpt","label":"SLP - Sup GPT Luna","color":"#64748b"}
+// @amp-agent-mode {"key":"supervisor-deepseek","label":"SLP - Sup DeepSeek","color":"#64748b"}
+// @amp-agent-mode {"key":"supervisor-glm","label":"SLP - Sup GLM 5.3","color":"#64748b"}
+// @amp-agent-mode {"key":"supervisor-glm-flash","label":"SLP - Sup GLM Flash","color":"#64748b"}
 import { readFileSync } from 'node:fs'
 import type {
 	Agent,
 	AgentReasoningEffort,
 	AgentToolSelection,
 	PluginAPI,
+	PluginThread,
 	PluginToolContext,
 	ThreadAssistantMessage,
 	ThreadID,
 } from '@ampcode/plugin'
 import { AgentRegistry } from './lib/registry'
+import { judge, readTurn } from './lib/watchdog'
 
 /**
  * Directory name of this plugin. Plugin tools are addressable as
@@ -29,6 +31,8 @@ import { AgentRegistry } from './lib/registry'
  */
 const PLUGIN_NAME = 'amp-orchestrator'
 const ORCHESTRATOR_TOOLS = `plugin__${PLUGIN_NAME}__*`
+/** Visible prefix on every orchestration mode, so they filter together. */
+const MODE_PREFIX = 'SLP - '
 const tool = (name: string): string => `plugin__${PLUGIN_NAME}__${name}`
 
 /** Read/inspect tools both the Lead and the Supervisor get. */
@@ -56,7 +60,10 @@ interface ModelSpec {
 /** A role every model can be pinned to. */
 interface RoleSpec {
 	slug: string
+	/** Full role name, used in descriptions. */
 	label: string
+	/** Compact role name used in the mode label. */
+	short: string
 	color: string
 	extends: 'high' | 'medium'
 	effort: AgentReasoningEffort
@@ -85,6 +92,7 @@ const ROLES: RoleSpec[] = [
 	{
 		slug: 'lead',
 		label: 'Lead',
+		short: 'Lead',
 		color: '#d97706',
 		extends: 'high',
 		effort: 'max',
@@ -99,6 +107,7 @@ const ROLES: RoleSpec[] = [
 	{
 		slug: 'peer',
 		label: 'Peer',
+		short: 'Peer',
 		color: '#2563eb',
 		extends: 'medium',
 		effort: 'high',
@@ -110,6 +119,7 @@ const ROLES: RoleSpec[] = [
 	{
 		slug: 'supervisor',
 		label: 'Supervisor',
+		short: 'Sup',
 		color: '#64748b',
 		extends: 'medium',
 		effort: 'high',
@@ -155,7 +165,7 @@ export default function (amp: PluginAPI) {
 	for (const model of MODELS) {
 		for (const role of ROLES) {
 			const key = `${role.slug}-${model.slug}`
-			const label = `${role.label} - ${model.short}`
+			const label = `${MODE_PREFIX}${role.short} ${model.short}`
 			const agent = amp.createAgent({
 				extends: role.extends,
 				model: model.model,
@@ -384,6 +394,76 @@ export default function (amp: PluginAPI) {
 				})
 				.join('\n')
 		},
+	})
+
+	// ── Watchdog: nudge threads, wake the Supervisor (B + C) ─────────────────
+	// The plugin sees agent.end for every thread this runner hosts, so it can
+	// course-correct a Lead or Peer without a separate monitoring loop.
+	//   C — a mechanical rule violation returns `continue` and nudges the thread.
+	//   B — a judgement call appends a digest to the Supervisor thread to wake it.
+	const roleCache = new Map<string, string | null>()
+	const supervisorThreads = new Set<string>()
+	const lastWake = new Map<string, number>()
+	const lastNudge = new Map<string, number>()
+	const WAKE_COOLDOWN_MS = 10 * 60 * 1000
+	const NUDGE_COOLDOWN_MS = 90 * 1000
+
+	async function roleOf(thread: PluginThread): Promise<string | null> {
+		const cached = roleCache.get(thread.id)
+		if (cached !== undefined) return cached
+		let role: string | null = null
+		try {
+			const agent = await thread.agent()
+			const instructions = (agent.definition as { instructions?: unknown }).instructions
+			if (typeof instructions === 'string') {
+				const trimmed = instructions.trim()
+				if (trimmed === LEAD_PROMPT) role = 'lead'
+				else if (trimmed === PEER_PROMPT) role = 'peer'
+				else if (trimmed === SUPERVISOR_PROMPT) role = 'supervisor'
+			}
+		} catch {
+			// Best effort: an unknown thread is simply not orchestrated.
+		}
+		roleCache.set(thread.id, role)
+		return role
+	}
+
+	amp.on('session.start', async (_event, ctx) => {
+		if ((await roleOf(ctx.thread)) === 'supervisor') supervisorThreads.add(ctx.thread.id)
+	})
+
+	amp.on('agent.end', async (event, ctx) => {
+		const role = await roleOf(ctx.thread)
+		if (role === 'supervisor') {
+			supervisorThreads.add(ctx.thread.id)
+			return
+		}
+		if (role !== 'lead' && role !== 'peer') return
+
+		const facts = readTurn(event.messages, amp.helpers)
+		const verdict = judge(event, facts)
+
+		// C — nudge the thread itself.
+		if (verdict.nudge) {
+			const now = Date.now()
+			if (now - (lastNudge.get(event.thread.id) ?? 0) < NUDGE_COOLDOWN_MS) return
+			lastNudge.set(event.thread.id, now)
+			return { action: 'continue' as const, userMessage: verdict.nudge }
+		}
+
+		// B — wake the Supervisor.
+		if (!verdict.wake) return
+		const now = Date.now()
+		if (now - (lastWake.get(event.thread.id) ?? 0) < WAKE_COOLDOWN_MS) return
+		const supervisor = [...supervisorThreads][0]
+		if (!supervisor) return
+		lastWake.set(event.thread.id, now)
+
+		const url = new URL(`/threads/${event.thread.id}`, amp.system.ampURL).href
+		await amp.threads.get(supervisor as ThreadID).appendUserMessage({
+			type: 'user-message',
+			content: `[watch] ${role} ${event.thread.id} — ${verdict.wake}\n${url}`,
+		})
 	})
 
 	// ── Agent instructions are the only guidance source ──────────────────────

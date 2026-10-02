@@ -38,7 +38,7 @@ Plugins repository, or point `amp plugins add` at it.
 
 ## Use
 
-Start a thread in a **Lead** mode (e.g. `Lead - GPT Luna`) and give it a
+Start a thread in a **Lead** mode (e.g. `SLP - Lead GPT Luna`) and give it a
 project-level request. The Lead will preflight, then spawn Peers for bounded
 outcomes — pick each Peer's model with the `model` argument of `peer_spawn`.
 Open a **Supervisor** thread yourself if you want an advisor watching.
@@ -46,7 +46,7 @@ Open a **Supervisor** thread yourself if you want an advisor watching.
 ### Modes
 
 Every role is registered once per model. Keys are `<role>-<model>`; labels are
-`<Role> - <Model short name>`.
+`SLP - <Role> <Model short name>`, so the whole set filters on the `SLP` prefix.
 
 | Role | Keys | Extends | Purpose |
 | --- | --- | --- | --- |
@@ -83,6 +83,24 @@ The Lead also keeps Amp's own thread tools (`create_thread`,
 `send_thread_message`, `wait_for_threads`, `get_thread_status`,
 `update_thread`), so it can archive a reconciled agent with
 `update_thread({ archived: true })`.
+
+## Course-correction (watchdog)
+
+The plugin watches every Lead and Peer turn on its runner (`agent.end`) and reacts
+in two ways:
+
+- **Nudge (mechanical).** An unambiguous rule violation — files changed with no
+  verification command run, or the same tool failing three times in one turn —
+  returns `continue` with a short correction sent straight back into that thread.
+  No Supervisor turn is spent.
+- **Wake the Supervisor (judgement).** A turn that ends in `error` / `cancelled`,
+  or a report that hands back `BLOCKED` / `REOPEN_REQUEST` / `DEPENDENCY_REQUEST`,
+  appends a digest to the Supervisor thread, which wakes it to decide.
+
+Both are throttled (nudge ≤ once per thread per 90s, Supervisor wake ≤ once per
+thread per 10 min) and the watchdog never reacts to its own nudge turn. The
+Supervisor must have been opened at least once on that runner so the plugin knows
+its thread; without one, judgement signals are dropped rather than guessed.
 
 ## Customize
 
