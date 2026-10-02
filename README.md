@@ -60,19 +60,25 @@ Models:
 | `glm` | `zhipuai/glm-5.3` | Lead `max` · Peer/Supervisor `high` |
 | `glm-flash` | `zhipuai/glm-5.3-flash` | Lead `max` · Peer/Supervisor `high` |
 
-### Tools (Lead only)
+### Tools
 
-| Tool | Does |
-| --- | --- |
-| `peer_spawn` | Create a Peer thread (choose `model`), send it a brief, return its thread ID. |
-| `peer_send` | Append a follow-up message to a Peer thread. |
-| `peer_wait` | Block once until a Peer finishes a turn; return its reply. |
-| `peer_status` | Read a Peer's activity state and recent messages. |
-| `peer_inbox` | List every Peer this Lead spawned, with status and latest report. |
+| Tool | Who | Does |
+| --- | --- | --- |
+| `peer_spawn` | Lead | Create a Peer thread (choose `model`), send it a brief, return its thread ID. |
+| `lead_spawn` | Supervisor | Create a successor Lead thread for a bounded recovery handoff. |
+| `agent_send` | Lead + Supervisor | Append a follow-up message to a spawned agent thread. |
+| `agent_wait` | Lead + Supervisor | Block once until an agent finishes a turn; return its reply. |
+| `agent_status` | Lead + Supervisor | Read an agent's activity state and recent messages. |
+| `agent_inbox` | Lead + Supervisor | List every agent this thread spawned, with status and latest report. |
+
+A Peer gets none of these, so it can never recursively spawn. A Lead cannot create
+a Lead — a project has exactly one Lead; only a Supervisor creates a successor
+Lead. Each spawned agent is a **separate Amp thread** (a child of the spawning
+thread), with its own `T-...` ID, transcript, and URL.
 
 The Lead also keeps Amp's own thread tools (`create_thread`,
 `send_thread_message`, `wait_for_threads`, `get_thread_status`,
-`update_thread`), so it can archive a reconciled peer with
+`update_thread`), so it can archive a reconciled agent with
 `update_thread({ archived: true })`.
 
 ## Customize
@@ -99,8 +105,8 @@ amp-orchestrator/
 
 ## Caveats
 
-- Peers are real Amp threads: they consume credits/tokens and appear in your
-  thread list. Archive them when reconciled.
+- Spawned agents are real Amp threads: they consume credits/tokens and appear in
+  your thread list. Archive them when reconciled.
 - The peer registry is a convenience index persisted under
   `~/.cache/amp/orchestrator/`; the threads themselves are the source of truth.
 - `peer_wait` and `wait_for_threads` block. Prefer one blocking wait per event

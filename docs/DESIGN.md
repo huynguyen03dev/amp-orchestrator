@@ -29,7 +29,7 @@ actual execution to Amp's thread machinery.
 index.ts
   ├─ readProfile('lead' | 'peer' | 'supervisor')  → createAgent({ instructions })
   ├─ registerAgentMode(lead | peer | supervisor)
-  └─ registerTool(peer_spawn | peer_send | peer_wait | peer_status | peer_inbox)
+  └─ registerTool(peer_spawn | lead_spawn | agent_send | agent_wait | agent_status | agent_inbox)
 
 lib/registry.ts   persisted index: id, name, disposition, status, last report
 ```
@@ -41,22 +41,23 @@ Lead, its Peers, and a Supervisor can run on different models. A mode key is
 `<role>-<model>` and pins `model` explicitly; each still extends a built-in mode
 so the prompt and tool tuning stay consistent with Amp:
 
-- **Lead** extends `high`, adds the orchestrator tools, uses the Lead
-  instruction, and runs at `max` effort.
-- **Peer** extends `medium`, excludes the orchestrator tools (so a Peer cannot
-  recursively spawn peers), and runs at `high` effort.
-- **Supervisor** extends `medium`, excludes the orchestrator tools and the file
-  write tools (so it stays advisory), and runs at `high` effort.
+- **Lead** extends `high`, gets `peer_spawn` plus the generic agent tools, uses
+  the Lead instruction, and runs at `max` effort. It cannot create a Lead.
+- **Peer** extends `medium` and gets no orchestrator tools, so it can never
+  recursively spawn.
+- **Supervisor** extends `medium`, gets `lead_spawn` plus the generic agent tools,
+  excludes the file write tools, and runs at `high` effort. It creates a
+  successor Lead for recovery but does not own project work.
 
-`peer_spawn` picks which model's Peer agent to create a thread from via its
-`model` argument.
+Spawn tools pick the model via their `model` argument, so the Lead and the
+Supervisor can each place an agent on any configured model.
 
 ### Tools
 
-`peer_spawn` is the only tool that creates a thread. The rest operate on an
-existing thread ID. `peer_wait` maps directly to `waitForResponse`, which
-resolves when the thread returns to `idle` after a turn and rejects on `error` or
-timeout.
+`peer_spawn` (Lead) and `lead_spawn` (Supervisor) are the only tools that create
+a thread. The rest operate on an existing thread ID. `agent_wait` maps directly
+to `waitForResponse`, which resolves when the thread returns to `idle` after a
+turn and rejects on `error` or timeout.
 
 ### Registry
 

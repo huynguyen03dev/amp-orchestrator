@@ -16,18 +16,28 @@ import type {
 	AgentReasoningEffort,
 	AgentToolSelection,
 	PluginAPI,
+	PluginToolContext,
 	ThreadAssistantMessage,
 	ThreadID,
 } from '@ampcode/plugin'
-import { PeerRegistry } from './lib/registry'
+import { AgentRegistry } from './lib/registry'
 
 /**
  * Directory name of this plugin. Plugin tools are addressable as
  * `plugin__<pluginName>__<toolName>`, so the directory must keep this name for
- * the Lead/Peer tool selections below to resolve.
+ * the tool selections below to resolve.
  */
 const PLUGIN_NAME = 'amp-orchestrator'
 const ORCHESTRATOR_TOOLS = `plugin__${PLUGIN_NAME}__*`
+const tool = (name: string): string => `plugin__${PLUGIN_NAME}__${name}`
+
+/** Read/inspect tools both the Lead and the Supervisor get. */
+const GENERIC_AGENT_TOOLS = [
+	tool('agent_send'),
+	tool('agent_wait'),
+	tool('agent_status'),
+	tool('agent_inbox'),
+]
 
 const readProfile = (name: string): string =>
 	readFileSync(new URL(`./profiles/${name}.md`, import.meta.url), 'utf8').trim()
@@ -62,6 +72,15 @@ const MODELS: ModelSpec[] = [
 	{ slug: 'glm-flash', model: 'zhipuai/glm-5.3-flash', short: 'GLM Flash' },
 ]
 
+/**
+ * Tool selection per role.
+ *
+ * - Lead: `peer_spawn` (peers only) plus the generic agent tools. It cannot
+ *   create a Lead, so a project has exactly one Lead at a time.
+ * - Supervisor: `lead_spawn` (successor Lead for recovery) plus the generic agent
+ *   tools. It cannot create a Peer.
+ * - Peer: no orchestrator tools at all, so it can never recursively spawn.
+ */
 const ROLES: RoleSpec[] = [
 	{
 		slug: 'lead',
@@ -70,7 +89,10 @@ const ROLES: RoleSpec[] = [
 		extends: 'high',
 		effort: 'max',
 		instructions: LEAD_PROMPT,
-		tools: { add: [ORCHESTRATOR_TOOLS] },
+		tools: {
+			add: [tool('peer_spawn'), ...GENERIC_AGENT_TOOLS],
+			exclude: [tool('lead_spawn')],
+		},
 		description: (m) =>
 			`Orchestrates Peers on ${m.short}: routes bounded outcomes, verifies, and accepts. Use to run a project.`,
 	},
@@ -93,15 +115,17 @@ const ROLES: RoleSpec[] = [
 		effort: 'high',
 		instructions: SUPERVISOR_PROMPT,
 		tools: {
+			add: [tool('lead_spawn'), ...GENERIC_AGENT_TOOLS],
 			exclude: [
-				ORCHESTRATOR_TOOLS,
+				tool('peer_spawn'),
 				'edit_file',
 				'create_file',
 				'delete_file',
 				'apply_patch',
 			],
 		},
-		description: (m) => `Advisory delivery-quality observer on ${m.short}. Does not own project work.`,
+		description: (m) =>
+			`Advisory observer on ${m.short}. Can create a successor Lead for recovery; does not own project work.`,
 	},
 ]
 
@@ -120,13 +144,13 @@ function str(input: Record<string, unknown>, key: string): string {
 
 export default function (amp: PluginAPI) {
 	const workspaceRoot = amp.system.workspaceRoot
-	const registry = new PeerRegistry(
+	const registry = new AgentRegistry(
 		workspaceRoot ? amp.helpers.filePathFromURI(workspaceRoot) : null,
 	)
 
 	// ── Modes: every model × every role ──────────────────────────────────────
-	// One peer agent handle per model, used by `peer_spawn`.
-	const peerAgents = new Map<string, Agent>()
+	// One agent handle per `<role>-<model>`, used by the spawn tools.
+	const agents = new Map<string, Agent>()
 
 	for (const model of MODELS) {
 		for (const role of ROLES) {
@@ -147,20 +171,66 @@ export default function (amp: PluginAPI) {
 				color: role.color,
 				agent: agent.definition,
 			})
-			if (role.slug === 'peer') peerAgents.set(model.slug, agent)
+			agents.set(key, agent)
 		}
 	}
 
 	const modelSlugs = MODELS.map((m) => m.slug)
 
-	// ── Orchestration tools ──────────────────────────────────────────────────
+	/** Shared spawn: create a thread for `<role>-<model>` and send it the brief. */
+	async function spawn(
+		roleSlug: 'lead' | 'peer',
+		input: Record<string, unknown>,
+		ctx: PluginToolContext,
+	): Promise<string> {
+		const modelSlug = str(input, 'model') || modelSlugs[0]
+		const name = str(input, 'name')
+		const brief = str(input, 'brief')
+		const disposition = str(input, 'disposition') || (roleSlug === 'lead' ? 'Lead' : 'Engineer')
+		if (!name) throw new Error(`${roleSlug}_spawn requires a non-empty name`)
+		if (!brief) throw new Error(`${roleSlug}_spawn requires a non-empty brief`)
+
+		const agent = agents.get(`${roleSlug}-${modelSlug}`)
+		if (!agent) {
+			throw new Error(
+				`Unknown model "${modelSlug}". Models: ${modelSlugs.join(', ')}.`,
+			)
+		}
+
+		const thread = await agent.createThread({ parentThreadID: ctx.thread.id })
+		const header =
+			roleSlug === 'lead'
+				? `[lead ${name} · ${modelSlug}]`
+				: `[peer ${name} · ${disposition} · ${modelSlug}]`
+		await thread.appendUserMessage({
+			type: 'user-message',
+			content: `${header}\n\n${brief}`,
+		})
+
+		registry.upsert({
+			id: thread.id,
+			role: roleSlug,
+			name,
+			disposition,
+			model: modelSlug,
+			brief,
+			createdAt: Date.now(),
+			updatedAt: Date.now(),
+			lastStatus: 'running',
+		})
+
+		const url = new URL(`/threads/${thread.id}`, amp.system.ampURL).href
+		return `Spawned ${roleSlug} "${name}" (${modelSlug}) → ${thread.id}\n${url}`
+	}
+
+	// ── Spawn tools (role-scoped) ────────────────────────────────────────────
 
 	amp.registerTool({
 		name: 'peer_spawn',
 		title: 'Spawn peer',
 		transcriptGroup: { active: 'Spawning peer', complete: 'Spawned peer' },
 		description:
-			'Create a new Peer thread that owns one bounded outcome, send it the brief, and return its thread ID.',
+			'Create a new Peer thread that owns one bounded outcome, send it the brief, and return its thread ID. Each Peer runs in its own Amp thread.',
 		inputSchema: {
 			type: 'object',
 			properties: {
@@ -185,48 +255,46 @@ export default function (amp: PluginAPI) {
 			},
 			required: ['name', 'disposition', 'brief'],
 		},
-		async execute(input, ctx) {
-			const name = str(input, 'name')
-			const disposition = str(input, 'disposition') || 'Engineer'
-			const brief = str(input, 'brief')
-			const modelSlug = str(input, 'model') || modelSlugs[0]
-			if (!name) throw new Error('peer_spawn requires a non-empty name')
-			if (!brief) throw new Error('peer_spawn requires a non-empty brief')
-			const peer = peerAgents.get(modelSlug)
-			if (!peer) {
-				throw new Error(`Unknown peer model "${modelSlug}". Known: ${modelSlugs.join(', ')}`)
-			}
-
-			const thread = await peer.createThread({ parentThreadID: ctx.thread.id })
-			await thread.appendUserMessage({
-				type: 'user-message',
-				content: `[peer ${name} · ${disposition} · ${modelSlug}]\n\n${brief}`,
-			})
-
-			registry.upsert({
-				id: thread.id,
-				name,
-				disposition,
-				brief,
-				createdAt: Date.now(),
-				updatedAt: Date.now(),
-				lastStatus: 'running',
-			})
-
-			const url = new URL(`/threads/${thread.id}`, amp.system.ampURL).href
-			return `Spawned peer "${name}" (${disposition} · ${modelSlug}) → ${thread.id}\n${url}`
-		},
+		execute: (input, ctx) => spawn('peer', input, ctx),
 	})
 
 	amp.registerTool({
-		name: 'peer_send',
-		title: 'Send to peer',
-		transcriptGroup: { active: 'Messaging peer', complete: 'Messaged peer' },
-		description: 'Append a follow-up message to an existing Peer thread.',
+		name: 'lead_spawn',
+		title: 'Spawn successor Lead',
+		transcriptGroup: { active: 'Spawning Lead', complete: 'Spawned Lead' },
+		description:
+			'Create a successor Lead thread for a bounded recovery handoff, send it the brief, and return its thread ID. Each Lead runs in its own Amp thread.',
 		inputSchema: {
 			type: 'object',
 			properties: {
-				threadId: { type: 'string', description: 'Peer thread ID, e.g. T-...' },
+				name: { type: 'string', description: 'Short handle for the new Lead.' },
+				brief: {
+					type: 'string',
+					description:
+						'Objective, current state, evidence, owned scope, and acceptance boundary for the handoff.',
+				},
+				model: {
+					type: 'string',
+					enum: modelSlugs,
+					description: `Model for the new Lead. One of: ${modelSlugs.join(', ')}. Defaults to "${modelSlugs[0]}".`,
+				},
+			},
+			required: ['name', 'brief'],
+		},
+		execute: (input, ctx) => spawn('lead', input, ctx),
+	})
+
+	// ── Generic agent tools (Lead and Supervisor) ────────────────────────────
+
+	amp.registerTool({
+		name: 'agent_send',
+		title: 'Send to agent',
+		transcriptGroup: { active: 'Messaging agent', complete: 'Messaged agent' },
+		description: 'Append a follow-up message to an agent thread you spawned.',
+		inputSchema: {
+			type: 'object',
+			properties: {
+				threadId: { type: 'string', description: 'Agent thread ID, e.g. T-...' },
 				message: { type: 'string', description: 'Message to append.' },
 			},
 			required: ['threadId', 'message'],
@@ -234,7 +302,7 @@ export default function (amp: PluginAPI) {
 		async execute(input) {
 			const threadId = str(input, 'threadId')
 			const message = str(input, 'message')
-			if (!threadId || !message) throw new Error('peer_send requires threadId and message')
+			if (!threadId || !message) throw new Error('agent_send requires threadId and message')
 			await amp.threads.get(threadId as ThreadID).appendUserMessage({
 				type: 'user-message',
 				content: message,
@@ -245,46 +313,46 @@ export default function (amp: PluginAPI) {
 	})
 
 	amp.registerTool({
-		name: 'peer_wait',
-		title: 'Wait for peer',
-		transcriptGroup: { active: 'Waiting for peer', complete: 'Peer replied' },
+		name: 'agent_wait',
+		title: 'Wait for agent',
+		transcriptGroup: { active: 'Waiting for agent', complete: 'Agent replied' },
 		description:
-			'Block once until a Peer finishes its current turn and return its reply. Rejects on error or timeout.',
+			'Block once until an agent finishes its current turn and return its reply. Rejects on error or timeout.',
 		inputSchema: {
 			type: 'object',
 			properties: {
-				threadId: { type: 'string', description: 'Peer thread ID, e.g. T-...' },
+				threadId: { type: 'string', description: 'Agent thread ID, e.g. T-...' },
 				timeoutMs: { type: 'number', description: 'Timeout in ms. Defaults to 10 minutes.' },
 			},
 			required: ['threadId'],
 		},
 		async execute(input) {
 			const threadId = str(input, 'threadId')
-			if (!threadId) throw new Error('peer_wait requires threadId')
+			if (!threadId) throw new Error('agent_wait requires threadId')
 			const timeoutMs = typeof input.timeoutMs === 'number' ? input.timeoutMs : undefined
 			const reply = await amp.threads
 				.get(threadId as ThreadID)
 				.waitForResponse(timeoutMs ? { timeoutMs } : undefined)
 			const text = textOf(reply)
 			registry.recordReport(threadId, text, 'idle')
-			return text || '(peer returned no text)'
+			return text || '(agent returned no text)'
 		},
 	})
 
 	amp.registerTool({
-		name: 'peer_status',
-		title: 'Peer status',
-		description: "Read a Peer thread's activity state and its most recent messages.",
+		name: 'agent_status',
+		title: 'Agent status',
+		description: "Read an agent thread's activity state and its most recent messages.",
 		inputSchema: {
 			type: 'object',
 			properties: {
-				threadId: { type: 'string', description: 'Peer thread ID, e.g. T-...' },
+				threadId: { type: 'string', description: 'Agent thread ID, e.g. T-...' },
 			},
 			required: ['threadId'],
 		},
 		async execute(input) {
 			const threadId = str(input, 'threadId')
-			if (!threadId) throw new Error('peer_status requires threadId')
+			if (!threadId) throw new Error('agent_status requires threadId')
 			const thread = amp.threads.get(threadId as ThreadID)
 			const state = await thread.state.get()
 			const messages = await thread.messages({ from: 'end', limit: 4 })
@@ -298,20 +366,20 @@ export default function (amp: PluginAPI) {
 	})
 
 	amp.registerTool({
-		name: 'peer_inbox',
-		title: 'Peer inbox',
+		name: 'agent_inbox',
+		title: 'Agent inbox',
 		transcriptGroup: { active: 'Reading inbox', complete: 'Read inbox' },
 		description:
-			'List every Peer this Lead has spawned, with disposition, status, and the latest report.',
+			'List every agent this thread spawned, with role, model, disposition, status, and the latest report.',
 		inputSchema: { type: 'object', properties: {} },
 		async execute() {
-			const peers = registry.list()
-			if (peers.length === 0) return 'No peers yet.'
-			return peers
-				.map((p) => {
-					const age = Math.round((Date.now() - p.updatedAt) / 1000)
-					const report = p.lastReport ? `\n  last report: ${p.lastReport.slice(0, 600)}` : ''
-					return `- ${p.name} (${p.disposition}) [${p.lastStatus}] ${p.id} · ${age}s ago${report}`
+			const records = registry.list()
+			if (records.length === 0) return 'No agents yet.'
+			return records
+				.map((a) => {
+					const age = Math.round((Date.now() - a.updatedAt) / 1000)
+					const report = a.lastReport ? `\n  last report: ${a.lastReport.slice(0, 600)}` : ''
+					return `- ${a.role} "${a.name}" (${a.disposition} · ${a.model}) [${a.lastStatus}] ${a.id} · ${age}s ago${report}`
 				})
 				.join('\n')
 		},
