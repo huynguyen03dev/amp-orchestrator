@@ -4,8 +4,9 @@ Amp-native agent orchestration: **Lead** modes that route bounded outcomes to
 **Peer** threads, advisory **Supervisor** modes, and a small inbox toolset to
 create, message, wait on, and track those peers.
 
-Every role is available on every model — four models × three roles = twelve
-modes, so a Lead, its Peers, and a Supervisor can each run on a different model.
+Every role is available on every model — five models × three roles, plus a
+Lead-only model, gives sixteen modes, so a Lead, its Peers, and a Supervisor can
+each run on a different model.
 
 It is a single Amp directory plugin. There is no external daemon and no control
 plane — peers are ordinary Amp threads, and the orchestration tools wrap Amp's
@@ -19,22 +20,28 @@ own thread APIs.
 
 ## Install
 
-System scope (this machine, all repos):
+Personal scope — **everywhere you use Amp** (all machines and orbs). Recommended:
 
 ```sh
-./install.sh          # copies this plugin into ~/.config/amp/plugins/amp-orchestrator
+./publish.sh          # copies into your Personal Plugins checkout and pushes
 ```
 
-Then reload plugins (`plugins: reload` in the command palette) or restart Amp.
-After editing the repo, re-run `./install.sh --force` to refresh the installed
-copy.
+Then reload plugins (`plugins: reload` in the command palette) or restart the
+runner.
 
-Personal/global scope (every machine): add this directory to your Personal
-Plugins repository, or point `amp plugins add` at it.
+System scope — this machine only:
 
-> Amp does not follow a symlinked plugin directory, so the installer copies. The
-> plugin directory **must be named `amp-orchestrator`**: the tools are granted by
-> the glob `plugin__amp-orchestrator__*`.
+```sh
+./install.sh          # copies into ~/.config/amp/plugins/amp-orchestrator
+```
+
+System plugins apply only on the machine where they are installed, and they take
+precedence over a Personal Plugin of the same name — so install one or the other,
+not both, or the copies can drift.
+
+> The plugin directory **must be named `amp-orchestrator`**: the tools are granted
+> by the glob `plugin__amp-orchestrator__*`. Amp does not follow a symlinked
+> plugin directory, so both scripts copy rather than link.
 
 ## Use
 
