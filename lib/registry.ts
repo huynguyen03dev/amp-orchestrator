@@ -11,6 +11,8 @@ export interface AgentRecord {
 	disposition: string
 	model: string
 	brief: string
+	/** Thread that spawned this agent, so a monitor can walk back to the Lead. */
+	spawnedBy: string
 	createdAt: number
 	updatedAt: number
 	lastStatus: string

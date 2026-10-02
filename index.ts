@@ -214,6 +214,7 @@ export default function (amp: PluginAPI) {
 			disposition,
 			model: modelSlug,
 			brief,
+			spawnedBy: ctx.thread.id,
 			createdAt: Date.now(),
 			updatedAt: Date.now(),
 			lastStatus: 'running',
@@ -370,7 +371,7 @@ export default function (amp: PluginAPI) {
 		title: 'Agent inbox',
 		transcriptGroup: { active: 'Reading inbox', complete: 'Read inbox' },
 		description:
-			'List every agent this thread spawned, with role, model, disposition, status, and the latest report.',
+			'List every agent this thread spawned, with role, model, disposition, status, spawning thread, and the latest report.',
 		inputSchema: { type: 'object', properties: {} },
 		async execute() {
 			const records = registry.list()
@@ -379,7 +380,7 @@ export default function (amp: PluginAPI) {
 				.map((a) => {
 					const age = Math.round((Date.now() - a.updatedAt) / 1000)
 					const report = a.lastReport ? `\n  last report: ${a.lastReport.slice(0, 600)}` : ''
-					return `- ${a.role} "${a.name}" (${a.disposition} · ${a.model}) [${a.lastStatus}] ${a.id} · ${age}s ago${report}`
+					return `- ${a.role} "${a.name}" (${a.disposition} · ${a.model}) [${a.lastStatus}] ${a.id} ← ${a.spawnedBy} · ${age}s ago${report}`
 				})
 				.join('\n')
 		},
