@@ -1,8 +1,11 @@
 # amp-orchestrator
 
-Amp-native agent orchestration: a **Lead** mode that routes bounded outcomes to
-**Peer** threads, an advisory **Supervisor** mode, and a small inbox toolset to
+Amp-native agent orchestration: **Lead** modes that route bounded outcomes to
+**Peer** threads, advisory **Supervisor** modes, and a small inbox toolset to
 create, message, wait on, and track those peers.
+
+Every role is available on every model — four models × three roles = twelve
+modes, so a Lead, its Peers, and a Supervisor can each run on a different model.
 
 It is a single Amp directory plugin. There is no external daemon and no control
 plane — peers are ordinary Amp threads, and the orchestration tools wrap Amp's
@@ -32,24 +35,36 @@ Plugins repository, or point `amp plugins add` at it.
 
 ## Use
 
-Start a thread in the **Lead** mode and give it a project-level request. The Lead
-will preflight, then spawn Peers for bounded outcomes. Peers run in the **Peer**
-mode (the Lead creates those threads for you). Open a **Supervisor** thread
-yourself if you want an advisor watching.
+Start a thread in a **Lead** mode (e.g. `Lead - GPT Luna`) and give it a
+project-level request. The Lead will preflight, then spawn Peers for bounded
+outcomes — pick each Peer's model with the `model` argument of `peer_spawn`.
+Open a **Supervisor** thread yourself if you want an advisor watching.
 
 ### Modes
 
-| Mode | Key | Extends | Purpose |
+Every role is registered once per model. Keys are `<role>-<model>`; labels are
+`<Role> - <Model short name>`.
+
+| Role | Keys | Extends | Purpose |
 | --- | --- | --- | --- |
-| Lead | `lead` | `high` | Framing, routing, integration, verification, acceptance. |
-| Peer | `peer` | `medium` | Owns one bounded outcome; reports evidence. |
-| Supervisor | `supervisor` | `medium` | Advisory delivery-quality observation; no project ownership. |
+| Lead | `lead-gpt`, `lead-deepseek`, `lead-glm`, `lead-glm-flash` | `high` | Framing, routing, integration, verification, acceptance. |
+| Peer | `peer-gpt`, `peer-deepseek`, `peer-glm`, `peer-glm-flash` | `medium` | Owns one bounded outcome; reports evidence. |
+| Supervisor | `supervisor-gpt`, `supervisor-deepseek`, `supervisor-glm`, `supervisor-glm-flash` | `medium` | Advisory delivery-quality observation; no project ownership. |
+
+Models:
+
+| Model slug | Model | Reasoning |
+| --- | --- | --- |
+| `gpt` | `openai/gpt-5.6-luna` | Lead `max` · Peer/Supervisor `high` |
+| `deepseek` | `deepseek/deepseek-v4.1-flash` | Lead `max` · Peer/Supervisor `high` |
+| `glm` | `zhipuai/glm-5.3` | Lead `max` · Peer/Supervisor `high` |
+| `glm-flash` | `zhipuai/glm-5.3-flash` | Lead `max` · Peer/Supervisor `high` |
 
 ### Tools (Lead only)
 
 | Tool | Does |
 | --- | --- |
-| `peer_spawn` | Create a Peer thread, send it a brief, return its thread ID. |
+| `peer_spawn` | Create a Peer thread (choose `model`), send it a brief, return its thread ID. |
 | `peer_send` | Append a follow-up message to a Peer thread. |
 | `peer_wait` | Block once until a Peer finishes a turn; return its reply. |
 | `peer_status` | Read a Peer's activity state and recent messages. |

@@ -1,8 +1,24 @@
-// @amp-agent-mode {"key":"lead","label":"Lead","color":"#d97706"}
-// @amp-agent-mode {"key":"peer","label":"Peer","color":"#2563eb"}
-// @amp-agent-mode {"key":"supervisor","label":"Supervisor","color":"#64748b"}
+// @amp-agent-mode {"key":"lead-gpt","label":"Lead - GPT Luna","color":"#d97706"}
+// @amp-agent-mode {"key":"lead-deepseek","label":"Lead - DeepSeek","color":"#d97706"}
+// @amp-agent-mode {"key":"lead-glm","label":"Lead - GLM 5.3","color":"#d97706"}
+// @amp-agent-mode {"key":"lead-glm-flash","label":"Lead - GLM Flash","color":"#d97706"}
+// @amp-agent-mode {"key":"peer-gpt","label":"Peer - GPT Luna","color":"#2563eb"}
+// @amp-agent-mode {"key":"peer-deepseek","label":"Peer - DeepSeek","color":"#2563eb"}
+// @amp-agent-mode {"key":"peer-glm","label":"Peer - GLM 5.3","color":"#2563eb"}
+// @amp-agent-mode {"key":"peer-glm-flash","label":"Peer - GLM Flash","color":"#2563eb"}
+// @amp-agent-mode {"key":"supervisor-gpt","label":"Supervisor - GPT Luna","color":"#64748b"}
+// @amp-agent-mode {"key":"supervisor-deepseek","label":"Supervisor - DeepSeek","color":"#64748b"}
+// @amp-agent-mode {"key":"supervisor-glm","label":"Supervisor - GLM 5.3","color":"#64748b"}
+// @amp-agent-mode {"key":"supervisor-glm-flash","label":"Supervisor - GLM Flash","color":"#64748b"}
 import { readFileSync } from 'node:fs'
-import type { PluginAPI, ThreadAssistantMessage, ThreadID } from '@ampcode/plugin'
+import type {
+	Agent,
+	AgentReasoningEffort,
+	AgentToolSelection,
+	PluginAPI,
+	ThreadAssistantMessage,
+	ThreadID,
+} from '@ampcode/plugin'
 import { PeerRegistry } from './lib/registry'
 
 /**
@@ -19,6 +35,75 @@ const readProfile = (name: string): string =>
 const LEAD_PROMPT = readProfile('lead')
 const PEER_PROMPT = readProfile('peer')
 const SUPERVISOR_PROMPT = readProfile('supervisor')
+
+/** A model every role can be pinned to. Models must be served by a user connection. */
+interface ModelSpec {
+	slug: string
+	model: string
+	short: string
+}
+
+/** A role every model can be pinned to. */
+interface RoleSpec {
+	slug: string
+	label: string
+	color: string
+	extends: 'high' | 'medium'
+	effort: AgentReasoningEffort
+	instructions: string
+	tools: AgentToolSelection
+	description: (model: ModelSpec) => string
+}
+
+const MODELS: ModelSpec[] = [
+	{ slug: 'gpt', model: 'openai/gpt-5.6-luna', short: 'GPT Luna' },
+	{ slug: 'deepseek', model: 'deepseek/deepseek-v4.1-flash', short: 'DeepSeek' },
+	{ slug: 'glm', model: 'zhipuai/glm-5.3', short: 'GLM 5.3' },
+	{ slug: 'glm-flash', model: 'zhipuai/glm-5.3-flash', short: 'GLM Flash' },
+]
+
+const ROLES: RoleSpec[] = [
+	{
+		slug: 'lead',
+		label: 'Lead',
+		color: '#d97706',
+		extends: 'high',
+		effort: 'max',
+		instructions: LEAD_PROMPT,
+		tools: { add: [ORCHESTRATOR_TOOLS] },
+		description: (m) =>
+			`Orchestrates Peers on ${m.short}: routes bounded outcomes, verifies, and accepts. Use to run a project.`,
+	},
+	{
+		slug: 'peer',
+		label: 'Peer',
+		color: '#2563eb',
+		extends: 'medium',
+		effort: 'high',
+		instructions: PEER_PROMPT,
+		tools: { exclude: [ORCHESTRATOR_TOOLS] },
+		description: (m) =>
+			`Independent collaborator on ${m.short} that owns one bounded outcome. Normally created by a Lead.`,
+	},
+	{
+		slug: 'supervisor',
+		label: 'Supervisor',
+		color: '#64748b',
+		extends: 'medium',
+		effort: 'high',
+		instructions: SUPERVISOR_PROMPT,
+		tools: {
+			exclude: [
+				ORCHESTRATOR_TOOLS,
+				'edit_file',
+				'create_file',
+				'delete_file',
+				'apply_patch',
+			],
+		},
+		description: (m) => `Advisory delivery-quality observer on ${m.short}. Does not own project work.`,
+	},
+]
 
 function textOf(message: ThreadAssistantMessage): string {
 	return message.content
@@ -39,62 +124,34 @@ export default function (amp: PluginAPI) {
 		workspaceRoot ? amp.helpers.filePathFromURI(workspaceRoot) : null,
 	)
 
-	// ── Agent modes ──────────────────────────────────────────────────────────
+	// ── Modes: every model × every role ──────────────────────────────────────
+	// One peer agent handle per model, used by `peer_spawn`.
+	const peerAgents = new Map<string, Agent>()
 
-	const lead = amp.createAgent({
-		name: 'lead',
-		extends: 'high',
-		instructions: LEAD_PROMPT,
-		tools: { add: [ORCHESTRATOR_TOOLS] },
-		display: { label: 'Lead', color: '#d97706' },
-	})
-	amp.registerAgentMode({
-		key: 'lead',
-		label: 'Lead',
-		description:
-			'Orchestrates Peers: routes bounded outcomes, verifies, and accepts. Use to run a project.',
-		color: '#d97706',
-		agent: lead.definition,
-	})
+	for (const model of MODELS) {
+		for (const role of ROLES) {
+			const key = `${role.slug}-${model.slug}`
+			const label = `${role.label} - ${model.short}`
+			const agent = amp.createAgent({
+				extends: role.extends,
+				model: model.model,
+				instructions: role.instructions,
+				tools: role.tools,
+				reasoningEffort: role.effort,
+				display: { label, color: role.color },
+			})
+			amp.registerAgentMode({
+				key,
+				label,
+				description: role.description(model),
+				color: role.color,
+				agent: agent.definition,
+			})
+			if (role.slug === 'peer') peerAgents.set(model.slug, agent)
+		}
+	}
 
-	const peer = amp.createAgent({
-		name: 'peer',
-		extends: 'medium',
-		instructions: PEER_PROMPT,
-		tools: { exclude: [ORCHESTRATOR_TOOLS] },
-		display: { label: 'Peer', color: '#2563eb' },
-	})
-	amp.registerAgentMode({
-		key: 'peer',
-		label: 'Peer',
-		description:
-			'Independent collaborator that owns one bounded outcome. Normally created by a Lead.',
-		color: '#2563eb',
-		agent: peer.definition,
-	})
-
-	const supervisor = amp.createAgent({
-		name: 'supervisor',
-		extends: 'medium',
-		instructions: SUPERVISOR_PROMPT,
-		tools: {
-			exclude: [
-				ORCHESTRATOR_TOOLS,
-				'edit_file',
-				'create_file',
-				'delete_file',
-				'apply_patch',
-			],
-		},
-		display: { label: 'Supervisor', color: '#64748b' },
-	})
-	amp.registerAgentMode({
-		key: 'supervisor',
-		label: 'Supervisor',
-		description: 'Advisory observer of delivery quality. Does not own project work.',
-		color: '#64748b',
-		agent: supervisor.definition,
-	})
+	const modelSlugs = MODELS.map((m) => m.slug)
 
 	// ── Orchestration tools ──────────────────────────────────────────────────
 
@@ -120,6 +177,11 @@ export default function (amp: PluginAPI) {
 					description:
 						'Outcome, context, constraints, owned/excluded scope, open question, and evidence expected.',
 				},
+				model: {
+					type: 'string',
+					enum: modelSlugs,
+					description: `Model for the peer. One of: ${modelSlugs.join(', ')}. Defaults to "${modelSlugs[0]}".`,
+				},
 			},
 			required: ['name', 'disposition', 'brief'],
 		},
@@ -127,13 +189,18 @@ export default function (amp: PluginAPI) {
 			const name = str(input, 'name')
 			const disposition = str(input, 'disposition') || 'Engineer'
 			const brief = str(input, 'brief')
+			const modelSlug = str(input, 'model') || modelSlugs[0]
 			if (!name) throw new Error('peer_spawn requires a non-empty name')
 			if (!brief) throw new Error('peer_spawn requires a non-empty brief')
+			const peer = peerAgents.get(modelSlug)
+			if (!peer) {
+				throw new Error(`Unknown peer model "${modelSlug}". Known: ${modelSlugs.join(', ')}`)
+			}
 
 			const thread = await peer.createThread({ parentThreadID: ctx.thread.id })
 			await thread.appendUserMessage({
 				type: 'user-message',
-				content: `[peer ${name} · ${disposition}]\n\n${brief}`,
+				content: `[peer ${name} · ${disposition} · ${modelSlug}]\n\n${brief}`,
 			})
 
 			registry.upsert({
@@ -147,7 +214,7 @@ export default function (amp: PluginAPI) {
 			})
 
 			const url = new URL(`/threads/${thread.id}`, amp.system.ampURL).href
-			return `Spawned peer "${name}" (${disposition}) → ${thread.id}\n${url}`
+			return `Spawned peer "${name}" (${disposition} · ${modelSlug}) → ${thread.id}\n${url}`
 		},
 	})
 

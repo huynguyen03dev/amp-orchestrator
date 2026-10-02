@@ -36,14 +36,20 @@ lib/registry.ts   persisted index: id, name, disposition, status, last report
 
 ### Modes
 
-- **Lead** extends `high`, adds the orchestrator tools, and uses the Lead
-  instruction. Extending a built-in mode keeps the model/prompt/tools tuning
-  consistent with the rest of Amp; the user can re-tune the model through the
-  Mode Dial.
-- **Peer** extends `medium` and excludes the orchestrator tools so a Peer cannot
-  recursively spawn peers.
+Every role is registered once per model (4 models × 3 roles = 12 modes), so a
+Lead, its Peers, and a Supervisor can run on different models. A mode key is
+`<role>-<model>` and pins `model` explicitly; each still extends a built-in mode
+so the prompt and tool tuning stay consistent with Amp:
+
+- **Lead** extends `high`, adds the orchestrator tools, uses the Lead
+  instruction, and runs at `max` effort.
+- **Peer** extends `medium`, excludes the orchestrator tools (so a Peer cannot
+  recursively spawn peers), and runs at `high` effort.
 - **Supervisor** extends `medium`, excludes the orchestrator tools and the file
-  write tools so it stays advisory.
+  write tools (so it stays advisory), and runs at `high` effort.
+
+`peer_spawn` picks which model's Peer agent to create a thread from via its
+`model` argument.
 
 ### Tools
 
