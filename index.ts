@@ -1,3 +1,6 @@
+// @amp-agent-mode {"key":"lead","label":"Lead","color":"#d97706"}
+// @amp-agent-mode {"key":"peer","label":"Peer","color":"#2563eb"}
+// @amp-agent-mode {"key":"supervisor","label":"Supervisor","color":"#64748b"}
 import { readFileSync } from 'node:fs'
 import type { PluginAPI, ThreadAssistantMessage, ThreadID } from '@ampcode/plugin'
 import { PeerRegistry } from './lib/registry'
@@ -30,7 +33,7 @@ function str(input: Record<string, unknown>, key: string): string {
 	return typeof value === 'string' ? value.trim() : ''
 }
 
-export default async function (amp: PluginAPI) {
+export default function (amp: PluginAPI) {
 	const workspaceRoot = amp.system.workspaceRoot
 	const registry = new PeerRegistry(
 		workspaceRoot ? amp.helpers.filePathFromURI(workspaceRoot) : null,
@@ -247,9 +250,8 @@ export default async function (amp: PluginAPI) {
 		},
 	})
 
-	// ── Skills ───────────────────────────────────────────────────────────────
-
-	await amp.registerSkill({ path: 'skills/lead' })
-	await amp.registerSkill({ path: 'skills/peer' })
-	await amp.registerSkill({ path: 'skills/supervisor' })
+	// ── Agent instructions are the only guidance source ──────────────────────
+	// The mode system prompts come from profiles/*.md via createAgent() above.
+	// No skills are registered: the Lead/Peer/Supervisor behavior lives entirely
+	// in the agent instructions.
 }

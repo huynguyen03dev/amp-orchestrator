@@ -10,9 +10,8 @@ own thread APIs.
 
 ## Requirements
 
-- Amp CLI with the plugin API that supports `registerAgentMode`, `registerTool`,
-  and `registerSkill` (the `@ampcode/plugin` surface shown by
-  `amp plugins show-docs`).
+- Amp CLI with the plugin API that supports `registerAgentMode` and
+  `registerTool` (the `@ampcode/plugin` surface shown by `amp plugins show-docs`).
 - Run Amp in a workspace so the peer registry has a home.
 
 ## Install
@@ -63,15 +62,12 @@ The Lead also keeps Amp's own thread tools (`create_thread`,
 
 ## Customize
 
-Edit the instruction profiles — the mode system prompts are read from them at
-plugin load:
+The mode system prompts are the only guidance source — the plugin registers no
+skills. They are read from these files at plugin load:
 
 - `profiles/lead.md`
 - `profiles/peer.md`
 - `profiles/supervisor.md`
-
-The skills under `skills/` are the short operational loops and are registered as
-`amp-orchestrator:lead`, `amp-orchestrator:peer`, `amp-orchestrator:supervisor`.
 
 After editing, run `plugins: reload`.
 
@@ -79,10 +75,9 @@ After editing, run `plugins: reload`.
 
 ```
 amp-orchestrator/
-├── index.ts              # plugin entry: modes + tools + skills
+├── index.ts              # plugin entry: modes + tools
 ├── lib/registry.ts       # persisted peer index (for peer_inbox)
 ├── profiles/             # mode system prompts (source of truth)
-├── skills/               # bundled skills (lead / peer / supervisor)
 ├── docs/DESIGN.md        # architecture and limits
 └── install.sh
 ```

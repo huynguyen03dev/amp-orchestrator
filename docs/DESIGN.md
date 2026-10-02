@@ -20,8 +20,8 @@ Amp already has the primitives a control plane would otherwise provide:
 | archive an agent | `update_thread({ archived: true })` |
 | role profiles | mode system prompts (`profiles/*.md`) |
 
-So the plugin is thin: it defines three modes, five tools, and three skills, and
-delegates the actual execution to Amp's thread machinery.
+So the plugin is thin: it defines three modes and five tools, and delegates the
+actual execution to Amp's thread machinery.
 
 ## Components
 
@@ -29,8 +29,7 @@ delegates the actual execution to Amp's thread machinery.
 index.ts
   ├─ readProfile('lead' | 'peer' | 'supervisor')  → createAgent({ instructions })
   ├─ registerAgentMode(lead | peer | supervisor)
-  ├─ registerTool(peer_spawn | peer_send | peer_wait | peer_status | peer_inbox)
-  └─ registerSkill(lead | peer | supervisor)
+  └─ registerTool(peer_spawn | peer_send | peer_wait | peer_status | peer_inbox)
 
 lib/registry.ts   persisted index: id, name, disposition, status, last report
 ```
