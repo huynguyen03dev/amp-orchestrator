@@ -22,16 +22,19 @@ own thread APIs.
 System scope (this machine, all repos):
 
 ```sh
-./install.sh          # symlinks this directory into ~/.config/amp/plugins/amp-orchestrator
+./install.sh          # copies this plugin into ~/.config/amp/plugins/amp-orchestrator
 ```
 
 Then reload plugins (`plugins: reload` in the command palette) or restart Amp.
+After editing the repo, re-run `./install.sh --force` to refresh the installed
+copy.
 
 Personal/global scope (every machine): add this directory to your Personal
 Plugins repository, or point `amp plugins add` at it.
 
-> The plugin directory **must be named `amp-orchestrator`**: the Lead mode grants
-> its tools by the glob `plugin__amp-orchestrator__*`.
+> Amp does not follow a symlinked plugin directory, so the installer copies. The
+> plugin directory **must be named `amp-orchestrator`**: the tools are granted by
+> the glob `plugin__amp-orchestrator__*`.
 
 ## Use
 

@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Install amp-orchestrator as a system plugin by symlinking this directory into
-# the user's plugin directory.
+# Install amp-orchestrator as a system plugin.
+#
+# Amp does not follow a symlinked plugin *directory* in the plugins directory, so
+# this copies the plugin files instead. Re-run after editing the repo to update
+# the installed copy (use --force to overwrite).
 set -euo pipefail
 
 SRC="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -10,11 +13,17 @@ DEST="$DEST_DIR/amp-orchestrator"
 mkdir -p "$DEST_DIR"
 
 if [ -e "$DEST" ] || [ -L "$DEST" ]; then
-	echo "Refusing to overwrite existing $DEST" >&2
-	echo "Remove it first if you want to reinstall." >&2
-	exit 1
+	if [ "${1:-}" = "--force" ]; then
+		rm -rf "$DEST"
+	else
+		echo "Refusing to overwrite existing $DEST" >&2
+		echo "Re-run with --force to replace it." >&2
+		exit 1
+	fi
 fi
 
-ln -s "$SRC" "$DEST"
-echo "Linked $DEST -> $SRC"
+mkdir -p "$DEST"
+cp -R "$SRC/index.ts" "$SRC/lib" "$SRC/profiles" "$DEST/"
+
+echo "Installed $DEST"
 echo "Reload plugins in Amp (command palette: plugins: reload), or restart Amp."
