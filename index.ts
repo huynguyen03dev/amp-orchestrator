@@ -2,15 +2,18 @@
 // @amp-agent-mode {"key":"lead-deepseek","label":"SLP/Lead DeepSeek","color":"#d97706"}
 // @amp-agent-mode {"key":"lead-glm","label":"SLP/Lead GLM 5.3","color":"#d97706"}
 // @amp-agent-mode {"key":"lead-glm-flash","label":"SLP/Lead GLM Flash","color":"#d97706"}
+// @amp-agent-mode {"key":"lead-gemini","label":"SLP/Lead Gemini 3.8","color":"#d97706"}
 // @amp-agent-mode {"key":"lead-sol","label":"SLP/Lead GPT-6.1 Sol","color":"#d97706"}
 // @amp-agent-mode {"key":"peer-gpt","label":"SLP/Peer GPT Luna","color":"#2563eb"}
 // @amp-agent-mode {"key":"peer-deepseek","label":"SLP/Peer DeepSeek","color":"#2563eb"}
 // @amp-agent-mode {"key":"peer-glm","label":"SLP/Peer GLM 5.3","color":"#2563eb"}
 // @amp-agent-mode {"key":"peer-glm-flash","label":"SLP/Peer GLM Flash","color":"#2563eb"}
+// @amp-agent-mode {"key":"peer-gemini","label":"SLP/Peer Gemini 3.8","color":"#2563eb"}
 // @amp-agent-mode {"key":"supervisor-gpt","label":"SLP/Sup GPT Luna","color":"#64748b"}
 // @amp-agent-mode {"key":"supervisor-deepseek","label":"SLP/Sup DeepSeek","color":"#64748b"}
 // @amp-agent-mode {"key":"supervisor-glm","label":"SLP/Sup GLM 5.3","color":"#64748b"}
 // @amp-agent-mode {"key":"supervisor-glm-flash","label":"SLP/Sup GLM Flash","color":"#64748b"}
+// @amp-agent-mode {"key":"supervisor-gemini","label":"SLP/Sup Gemini 3.8","color":"#64748b"}
 import { readFileSync } from 'node:fs'
 import type {
 	Agent,
@@ -82,6 +85,7 @@ const MODELS: ModelSpec[] = [
 	{ slug: 'deepseek', model: 'deepseek/deepseek-v4.1-flash', short: 'DeepSeek' },
 	{ slug: 'glm', model: 'zhipuai/glm-5.3', short: 'GLM 5.3' },
 	{ slug: 'glm-flash', model: 'zhipuai/glm-5.3-flash', short: 'GLM Flash' },
+	{ slug: 'gemini', model: 'google/gemini-3.8-flash', short: 'Gemini 3.8' },
 	// Expensive: reserve it for the Lead role only, and keep effort low — it is strong as-is.
 	{
 		slug: 'sol',

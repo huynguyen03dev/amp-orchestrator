@@ -38,7 +38,7 @@ Plugins repository, or point `amp plugins add` at it.
 
 ## Use
 
-Start a thread in a **Lead** mode (e.g. `SLP - Lead GPT Luna`) and give it a
+Start a thread in a **Lead** mode (e.g. `SLP/Lead GPT Luna`) and give it a
 project-level request. The Lead will preflight, then spawn Peers for bounded
 outcomes — pick each Peer's model with the `model` argument of `peer_spawn`.
 Open a **Supervisor** thread yourself if you want an advisor watching.
@@ -46,13 +46,13 @@ Open a **Supervisor** thread yourself if you want an advisor watching.
 ### Modes
 
 Every role is registered once per model. Keys are `<role>-<model>`; labels are
-`SLP - <Role> <Model short name>`, so the whole set filters on the `SLP` prefix.
+`SLP/<Role> <Model short name>`, so the whole set filters on the `SLP` prefix.
 
 | Role | Keys | Extends | Purpose |
 | --- | --- | --- | --- |
-| Lead | `lead-gpt`, `lead-deepseek`, `lead-glm`, `lead-glm-flash`, `lead-sol` | `high` | Framing, routing, integration, verification, acceptance. |
-| Peer | `peer-gpt`, `peer-deepseek`, `peer-glm`, `peer-glm-flash` | `medium` | Owns one bounded outcome; reports evidence. |
-| Supervisor | `supervisor-gpt`, `supervisor-deepseek`, `supervisor-glm`, `supervisor-glm-flash` | `medium` | Advisory delivery-quality observation; no project ownership. |
+| Lead | `lead-gpt`, `lead-deepseek`, `lead-glm`, `lead-glm-flash`, `lead-gemini`, `lead-sol` | `high` | Framing, routing, integration, verification, acceptance. |
+| Peer | `peer-gpt`, `peer-deepseek`, `peer-glm`, `peer-glm-flash`, `peer-gemini` | `medium` | Owns one bounded outcome; reports evidence. |
+| Supervisor | `supervisor-gpt`, `supervisor-deepseek`, `supervisor-glm`, `supervisor-glm-flash`, `supervisor-gemini` | `medium` | Advisory delivery-quality observation; no project ownership. |
 
 Models:
 
@@ -62,6 +62,7 @@ Models:
 | `deepseek` | `deepseek/deepseek-v4.1-flash` | Lead `max` · Peer/Supervisor `high` |
 | `glm` | `zhipuai/glm-5.3` | Lead `max` · Peer/Supervisor `high` |
 | `glm-flash` | `zhipuai/glm-5.3-flash` | Lead `max` · Peer/Supervisor `high` |
+| `gemini` | `google/gemini-3.8-flash` | Lead `max` · Peer/Supervisor `high` |
 | `sol` | `openai/gpt-6.1-sol` | Lead `low` — **Lead only** (expensive) |
 
 A model may be restricted to some roles with a `roles` list, and override the
