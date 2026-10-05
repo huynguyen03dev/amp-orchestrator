@@ -17,35 +17,65 @@
 import { readFileSync } from 'node:fs'
 import type {
 	Agent,
+	AgentEndEvent,
 	AgentReasoningEffort,
+	AgentSubagentPin,
 	AgentToolSelection,
 	PluginAPI,
 	PluginThread,
 	PluginToolContext,
-	ThreadAssistantMessage,
 	ThreadID,
 } from '@ampcode/plugin'
-import { AgentRegistry } from './lib/registry'
-import { judge, readTurn } from './lib/watchdog'
+import { AgentRegistry, type AgentRecord } from './lib/registry'
 
 /**
- * Directory name of this plugin. Plugin tools are addressable as
- * `plugin__<pluginName>__<toolName>`, so the directory must keep this name for
- * the tool selections below to resolve.
+ * Orchestration tools, by their bare registered name.
+ *
+ * `tools.exclude` matches these ONLY as bare names. Amp's documented
+ * `plugin__<pluginName>__<toolName>` form and the scoped glob
+ * `plugin__<pluginName>__*` do not match this plugin's own tools, so using them
+ * silently leaves every role holding every spawn tool.
+ *
+ * Verified 2026-10-04 on a freshly restarted runner, with `shell_command` as a
+ * freshness control (it must disappear, proving the runner used this file):
+ *   exclude ['plugin__amp-orchestrator__*']                     -> tools kept
+ *   exclude ['peer_spawn', 'lead_spawn', 'agent_inbox', ...]    -> tools removed
+ *   exclude ['plugin__*']                                       -> tools removed
+ * `exclude` always wins over `add`, so `plugin__*` cannot be paired with `add`
+ * to re-grant a single tool; exclude only what the role must not have.
  */
-const PLUGIN_NAME = 'amp-orchestrator'
-const ORCHESTRATOR_TOOLS = `plugin__${PLUGIN_NAME}__*`
+const ORCHESTRATOR_TOOLS = ['peer_spawn', 'lead_spawn', 'agent_inbox', 'agent_cancel'] as const
 /** Visible prefix on every orchestration mode, so they filter together. */
 const MODE_PREFIX = 'SLP/'
-const tool = (name: string): string => `plugin__${PLUGIN_NAME}__${name}`
 
-/** Read/inspect tools both the Lead and the Supervisor get. */
-const GENERIC_AGENT_TOOLS = [
-	tool('agent_send'),
-	tool('agent_wait'),
-	tool('agent_status'),
-	tool('agent_inbox'),
-]
+/** Orchestration tools both the Lead and the Supervisor get. */
+const GENERIC_AGENT_TOOLS = ['agent_inbox', 'agent_cancel'] as const
+
+/**
+ * Subagents no orchestration role may use.
+ *
+ * - `painter` is expensive and no role needs image generation.
+ * - `Task` is the general-purpose subagent runner. Excluding it keeps delegation
+ *   explicit in SLP: a Lead routes work to a Peer through `peer_spawn` instead of
+ *   quietly spinning up an ad-hoc Task subagent. `librarian` and `finder` stay
+ *   available for read-only research.
+ */
+const DISABLED_SUBAGENTS = ['painter', 'Task'] as const
+
+/**
+ * Default Oracle pin for roles that keep the Oracle tool, on the user's own
+ * cheaper connection. A model pin on the specific mode wins over this one
+ * (`lead-sol` pins Sol). An unavailable model falls back to Amp's automatic
+ * routing at run time.
+ */
+const ORACLE_PIN = { model: 'zhipuai/glm-5.3', effort: 'high' } as const
+
+/**
+ * Subagent pin for every role. With `Task` excluded, the only subagents left are
+ * `librarian` and `finder` — read-only research — so a light model is enough.
+ * `lead-sol` overrides this with Luna at max effort.
+ */
+const SUBAGENT_PIN = { model: 'deepseek/deepseek-v4.1-flash', effort: 'high' } as const
 
 const readProfile = (name: string): string =>
 	readFileSync(new URL(`./profiles/${name}.md`, import.meta.url), 'utf8').trim()
@@ -63,6 +93,10 @@ interface ModelSpec {
 	roles?: readonly string[]
 	/** Reasoning effort override for this model. Omit to use the role's effort. */
 	effort?: AgentReasoningEffort
+	/** Oracle pin for modes on this model. Falls back to the role's pin. */
+	oracle?: AgentSubagentPin
+	/** Subagent pin for modes on this model. Falls back to the role's pin. */
+	subagents?: AgentSubagentPin
 }
 
 /** A role every model can be pinned to. */
@@ -77,13 +111,24 @@ interface RoleSpec {
 	effort: AgentReasoningEffort
 	instructions: string
 	tools: AgentToolSelection
+	/** Subagent pin for this role's Oracle. Omit for a role without the Oracle tool. */
+	oracle?: AgentSubagentPin
+	/** Subagent pin for this role's Task/finder/librarian subagents. */
+	subagents?: AgentSubagentPin
 	description: (model: ModelSpec) => string
 }
 
 const MODELS: ModelSpec[] = [
 	{ slug: 'gpt', model: 'openai/gpt-5.6-luna', short: 'GPT Luna' },
 	{ slug: 'deepseek', model: 'deepseek/deepseek-v4.1-flash', short: 'DeepSeek' },
-	{ slug: 'glm', model: 'zhipuai/glm-5.3', short: 'GLM 5.3' },
+	{
+		slug: 'glm',
+		model: 'zhipuai/glm-5.3',
+		short: 'GLM 5.3',
+		// GLM 5.3 is the cheapest reasoner here, so its Lead consults Sol at
+		// medium effort for the Oracle rather than a model of its own class.
+		oracle: { model: 'openai/gpt-6.1-sol', effort: 'medium' },
+	},
 	{ slug: 'glm-flash', model: 'zhipuai/glm-5.3-flash', short: 'GLM Flash' },
 	{ slug: 'gemini', model: 'google/gemini-3.8-flash', short: 'Gemini 3.8' },
 	// Expensive: reserve it for the Lead role only, and keep effort low — it is strong as-is.
@@ -93,17 +138,26 @@ const MODELS: ModelSpec[] = [
 		short: 'GPT-6.1 Sol',
 		roles: ['lead'],
 		effort: 'low',
+		// The strongest reasoner here, so it consults itself for the Oracle, and
+		// uses Luna at max effort for its read-only subagents (librarian, finder).
+		oracle: { model: 'openai/gpt-6.1-sol', effort: 'high' },
+		subagents: { model: 'openai/gpt-5.6-luna', effort: 'max' },
 	},
 ]
 
 /**
  * Tool selection per role.
  *
- * - Lead: `peer_spawn` (peers only) plus the generic agent tools. It cannot
- *   create a Lead, so a project has exactly one Lead at a time.
- * - Supervisor: `lead_spawn` (successor Lead for recovery) plus the generic agent
- *   tools. It cannot create a Peer.
- * - Peer: no orchestrator tools at all, so it can never recursively spawn.
+ * - Lead: keeps `peer_spawn` plus the generic agent tools, and cannot create a
+ *   Lead, so a project has exactly one Lead at a time.
+ * - Supervisor: keeps `lead_spawn` (successor Lead for recovery) plus the
+ *   generic agent tools, and cannot create a Peer, consult an Oracle, or edit
+ *   files — it only observes and intervenes.
+ * - Peer: keeps no orchestrator tool at all (so it can never recursively spawn)
+ *   and no Oracle subagent, so it forms its own technical judgment.
+ *
+ * These bind only because the exclude lists use bare tool names; see
+ * ORCHESTRATOR_TOOLS above for why the qualified form does not work.
  */
 const ROLES: RoleSpec[] = [
 	{
@@ -115,9 +169,11 @@ const ROLES: RoleSpec[] = [
 		effort: 'max',
 		instructions: LEAD_PROMPT,
 		tools: {
-			add: [tool('peer_spawn'), ...GENERIC_AGENT_TOOLS],
-			exclude: [tool('lead_spawn')],
+			add: ['peer_spawn', ...GENERIC_AGENT_TOOLS],
+			exclude: ['lead_spawn', ...DISABLED_SUBAGENTS],
 		},
+		oracle: ORACLE_PIN,
+		subagents: SUBAGENT_PIN,
 		description: (m) =>
 			`Orchestrates Peers on ${m.short}: routes bounded outcomes, verifies, and accepts. Use to run a project.`,
 	},
@@ -129,7 +185,10 @@ const ROLES: RoleSpec[] = [
 		extends: 'medium',
 		effort: 'high',
 		instructions: PEER_PROMPT,
-		tools: { exclude: [ORCHESTRATOR_TOOLS] },
+		// Peer: no orchestrator tool, and no Oracle — a Peer forms its own
+		// judgment instead of consulting a second opinion subagent.
+		tools: { exclude: [...ORCHESTRATOR_TOOLS, 'oracle', ...DISABLED_SUBAGENTS] },
+		subagents: SUBAGENT_PIN,
 		description: (m) =>
 			`Independent collaborator on ${m.short} that owns one bounded outcome. Normally created by a Lead.`,
 	},
@@ -142,31 +201,78 @@ const ROLES: RoleSpec[] = [
 		effort: 'high',
 		instructions: SUPERVISOR_PROMPT,
 		tools: {
-			add: [tool('lead_spawn'), ...GENERIC_AGENT_TOOLS],
+			add: ['lead_spawn', ...GENERIC_AGENT_TOOLS],
 			exclude: [
-				tool('peer_spawn'),
+				'peer_spawn',
+				'oracle',
+				...DISABLED_SUBAGENTS,
 				'edit_file',
 				'create_file',
 				'delete_file',
 				'apply_patch',
 			],
 		},
+		subagents: SUBAGENT_PIN,
 		description: (m) =>
 			`Advisory observer on ${m.short}. Can create a successor Lead for recovery; does not own project work.`,
 	},
 ]
 
-function textOf(message: ThreadAssistantMessage): string {
-	return message.content
-		.filter((block): block is { type: 'text'; text: string } => block.type === 'text')
-		.map((block) => block.text)
-		.join('\n')
-		.trim()
-}
-
 function str(input: Record<string, unknown>, key: string): string {
 	const value = input[key]
 	return typeof value === 'string' ? value.trim() : ''
+}
+
+/**
+ * How much of an agent's final output is inlined into the notice its parent
+ * receives. Reports are usually a few KB; the cap keeps one runaway report from
+ * dominating the parent's context, and the thread URL stays as the escape hatch.
+ */
+const REPORT_INLINE_LIMIT = 6000
+
+/**
+ * The message appended to the thread that spawned an agent once that agent
+ * settles.
+ *
+ * The agent's final output is inlined so the parent can act on the result
+ * without reading the child thread first.
+ */
+function settledNotice(
+	record: AgentRecord,
+	status: AgentEndEvent['status'],
+	report: string,
+	url: string,
+): string {
+	const trimmed = report.trim()
+	const body =
+		trimmed.length > REPORT_INLINE_LIMIT
+			? `${trimmed.slice(0, REPORT_INLINE_LIMIT)}\n…(truncated — full report: ${url})`
+			: trimmed
+	return [
+		`[${record.role} ${record.name} · ${record.disposition} · ${record.model} · ${status}]`,
+		body || '(no text output this turn)',
+		url,
+	].join('\n\n')
+}
+
+/**
+ * The agent's closing words: the last non-empty text block of the turn.
+ *
+ * Concatenating every text block of the last assistant message would drag
+ * mid-turn narration ("Working on it.") into the parent's notice. When an agent
+ * finishes it states the outcome last, and that closing statement is all the
+ * parent needs to act on, so take only that block.
+ */
+function closingText(messages: AgentEndEvent['messages']): string {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i]
+		if (message.role !== 'assistant') continue
+		for (let j = message.content.length - 1; j >= 0; j--) {
+			const block = message.content[j]
+			if (block.type === 'text' && block.text.trim()) return block.text.trim()
+		}
+	}
+	return ''
 }
 
 export default function (amp: PluginAPI) {
@@ -185,12 +291,16 @@ export default function (amp: PluginAPI) {
 			if (model.roles && !model.roles.includes(role.slug)) continue
 			const key = `${role.slug}-${model.slug}`
 			const label = `${MODE_PREFIX}${role.short} ${model.short}`
+			const oraclePin = model.oracle ?? role.oracle
+			const subagentsPin = model.subagents ?? role.subagents
 			const agent = amp.createAgent({
 				extends: role.extends,
 				model: model.model,
 				instructions: role.instructions,
 				tools: role.tools,
 				reasoningEffort: model.effort ?? role.effort,
+				...(oraclePin ? { oracle: oraclePin } : {}),
+				...(subagentsPin ? { subagents: subagentsPin } : {}),
 				display: { label, color: role.color },
 			})
 			amp.registerAgentMode({
@@ -238,6 +348,9 @@ export default function (amp: PluginAPI) {
 			type: 'user-message',
 			content: `${header}\n\n${brief}`,
 		})
+		// The brief counts as this thread addressing the new agent, so its first
+		// settle reports back here.
+		expectReply(thread.id, ctx.thread.id)
 
 		registry.upsert({
 			id: thread.id,
@@ -320,62 +433,11 @@ export default function (amp: PluginAPI) {
 	// ── Generic agent tools (Lead and Supervisor) ────────────────────────────
 
 	amp.registerTool({
-		name: 'agent_send',
-		title: 'Send to agent',
-		transcriptGroup: { active: 'Messaging agent', complete: 'Messaged agent' },
-		description: 'Append a follow-up message to an agent thread you spawned.',
-		inputSchema: {
-			type: 'object',
-			properties: {
-				threadId: { type: 'string', description: 'Agent thread ID, e.g. T-...' },
-				message: { type: 'string', description: 'Message to append.' },
-			},
-			required: ['threadId', 'message'],
-		},
-		async execute(input) {
-			const threadId = str(input, 'threadId')
-			const message = str(input, 'message')
-			if (!threadId || !message) throw new Error('agent_send requires threadId and message')
-			await amp.threads.get(threadId as ThreadID).appendUserMessage({
-				type: 'user-message',
-				content: message,
-			})
-			registry.touch(threadId, 'running')
-			return `Sent to ${threadId}`
-		},
-	})
-
-	amp.registerTool({
-		name: 'agent_wait',
-		title: 'Wait for agent',
-		transcriptGroup: { active: 'Waiting for agent', complete: 'Agent replied' },
+		name: 'agent_cancel',
+		title: 'Cancel agent',
+		transcriptGroup: { active: 'Cancelling agent', complete: 'Cancelled agent' },
 		description:
-			'Block once until an agent finishes its current turn and return its reply. Rejects on error or timeout.',
-		inputSchema: {
-			type: 'object',
-			properties: {
-				threadId: { type: 'string', description: 'Agent thread ID, e.g. T-...' },
-				timeoutMs: { type: 'number', description: 'Timeout in ms. Defaults to 10 minutes.' },
-			},
-			required: ['threadId'],
-		},
-		async execute(input) {
-			const threadId = str(input, 'threadId')
-			if (!threadId) throw new Error('agent_wait requires threadId')
-			const timeoutMs = typeof input.timeoutMs === 'number' ? input.timeoutMs : undefined
-			const reply = await amp.threads
-				.get(threadId as ThreadID)
-				.waitForResponse(timeoutMs ? { timeoutMs } : undefined)
-			const text = textOf(reply)
-			registry.recordReport(threadId, text, 'idle')
-			return text || '(agent returned no text)'
-		},
-	})
-
-	amp.registerTool({
-		name: 'agent_status',
-		title: 'Agent status',
-		description: "Read an agent thread's activity state and its most recent messages.",
+			"Interrupt an agent thread's current turn. Use to stop a runaway or misdirected agent; the thread stays available for follow-up.",
 		inputSchema: {
 			type: 'object',
 			properties: {
@@ -385,16 +447,10 @@ export default function (amp: PluginAPI) {
 		},
 		async execute(input) {
 			const threadId = str(input, 'threadId')
-			if (!threadId) throw new Error('agent_status requires threadId')
-			const thread = amp.threads.get(threadId as ThreadID)
-			const state = await thread.state.get()
-			const messages = await thread.messages({ from: 'end', limit: 4 })
-			const recent = messages.map((message) => {
-				if (message.role === 'assistant') return `assistant: ${textOf(message).slice(0, 800)}`
-				if (message.role === 'user') return 'user: (brief or follow-up)'
-				return 'info'
-			})
-			return JSON.stringify({ threadId, state, recent }, null, 2)
+			if (!threadId) throw new Error('agent_cancel requires threadId')
+			await amp.threads.get(threadId as ThreadID).cancel()
+			registry.touch(threadId, 'cancelled')
+			return `Cancelled the current turn of ${threadId}`
 		},
 	})
 
@@ -418,17 +474,12 @@ export default function (amp: PluginAPI) {
 		},
 	})
 
-	// ── Watchdog: nudge threads, wake the Supervisor (B + C) ─────────────────
-	// The plugin sees agent.end for every thread this runner hosts, so it can
-	// course-correct a Lead or Peer without a separate monitoring loop.
-	//   C — a mechanical rule violation returns `continue` and nudges the thread.
-	//   B — a judgement call appends a digest to the Supervisor thread to wake it.
+	// ── Thread roles ─────────────────────────────────────────────────────────
+	// The plugin sees agent.end for every thread this runner hosts. It uses the
+	// role only to decide what to record; it never corrects, reopens, or redirects
+	// a thread. Judging the quality of the work belongs to the Supervisor, which
+	// reads threads on its own schedule rather than reacting to heuristics here.
 	const roleCache = new Map<string, string | null>()
-	const supervisorThreads = new Set<string>()
-	const lastWake = new Map<string, number>()
-	const lastNudge = new Map<string, number>()
-	const WAKE_COOLDOWN_MS = 10 * 60 * 1000
-	const NUDGE_COOLDOWN_MS = 90 * 1000
 
 	async function roleOf(thread: PluginThread): Promise<string | null> {
 		const cached = roleCache.get(thread.id)
@@ -450,42 +501,84 @@ export default function (amp: PluginAPI) {
 		return role
 	}
 
+	/**
+	 * Who a thread owes one report to when it next settles, keyed by that thread.
+	 *
+	 * A thread reports once, to whoever last addressed it. The plugin registers
+	 * this when it hands a new agent its brief, and when an agent messages a
+	 * known agent thread directly. The settle consumes it, so later turns stay
+	 * silent until someone addresses the thread again.
+	 */
+	const pendingReply = new Map<string, string>()
+
+	/** Turns already reported, so a redelivered `agent.end` cannot report twice. */
+	const reportedTurns = new Set<string>()
+
+	/** Record that `child` owes `to` one report when it next settles. */
+	function expectReply(child: string, to: string): void {
+		if (!child || !to || child === to) return
+		pendingReply.set(child, to)
+	}
+
+	/**
+	 * Report a settled turn to the thread that last addressed this one, inlining
+	 * the agent's closing output so the recipient does not have to read the child
+	 * thread first.
+	 */
+	async function reportSettle(event: AgentEndEvent): Promise<void> {
+		const target = pendingReply.get(event.thread.id)
+		if (!target) return
+		pendingReply.delete(event.thread.id)
+
+		const turnKey = `${event.thread.id}:${event.id}`
+		if (reportedTurns.has(turnKey)) return
+		reportedTurns.add(turnKey)
+		if (reportedTurns.size > 500) reportedTurns.clear()
+
+		const record = registry.get(event.thread.id)
+		if (!record) return
+
+		const url = new URL(`/threads/${event.thread.id}`, amp.system.ampURL).href
+		await amp.threads.get(target as ThreadID).appendUserMessage({
+			type: 'user-message',
+			content: settledNotice(record, event.status, closingText(event.messages), url),
+		})
+	}
+
+	/**
+	 * Agent-to-agent messages register a one-shot reply. Only an agent's own tool
+	 * call counts here: a human typing into a thread is not a tool call, so it
+	 * never puts a thread on a reporting loop.
+	 */
+	const MESSAGING_TOOLS = new Set(['send_thread_message', 'agent_send'])
+	amp.on('tool.call', (event) => {
+		if (MESSAGING_TOOLS.has(event.tool)) {
+			const target = str(event.input, 'thread') || str(event.input, 'threadId')
+			if (target && registry.get(target)) expectReply(target, event.thread.id)
+		}
+		return { action: 'allow' as const }
+	})
+
 	amp.on('session.start', async (_event, ctx) => {
-		if ((await roleOf(ctx.thread)) === 'supervisor') supervisorThreads.add(ctx.thread.id)
+		registry.touch(ctx.thread.id, 'running')
 	})
 
 	amp.on('agent.end', async (event, ctx) => {
 		const role = await roleOf(ctx.thread)
-		if (role === 'supervisor') {
-			supervisorThreads.add(ctx.thread.id)
-			return
+
+		// Keep agent_inbox's last report current, from the agent's closing words.
+		if (registry.get(event.thread.id)) {
+			registry.recordReport(
+				event.thread.id,
+				closingText(event.messages) || '(no text output this turn)',
+				event.status === 'done' ? 'idle' : event.status,
+			)
 		}
+
 		if (role !== 'lead' && role !== 'peer') return
 
-		const facts = readTurn(event.messages, amp.helpers)
-		const verdict = judge(event, facts)
-
-		// C — nudge the thread itself.
-		if (verdict.nudge) {
-			const now = Date.now()
-			if (now - (lastNudge.get(event.thread.id) ?? 0) < NUDGE_COOLDOWN_MS) return
-			lastNudge.set(event.thread.id, now)
-			return { action: 'continue' as const, userMessage: verdict.nudge }
-		}
-
-		// B — wake the Supervisor.
-		if (!verdict.wake) return
-		const now = Date.now()
-		if (now - (lastWake.get(event.thread.id) ?? 0) < WAKE_COOLDOWN_MS) return
-		const supervisor = [...supervisorThreads][0]
-		if (!supervisor) return
-		lastWake.set(event.thread.id, now)
-
-		const url = new URL(`/threads/${event.thread.id}`, amp.system.ampURL).href
-		await amp.threads.get(supervisor as ThreadID).appendUserMessage({
-			type: 'user-message',
-			content: `[watch] ${role} ${event.thread.id} — ${verdict.wake}\n${url}`,
-		})
+		// A — report the settled turn to whoever last addressed this thread.
+		await reportSettle(event)
 	})
 
 	// ── Agent instructions are the only guidance source ──────────────────────

@@ -17,7 +17,9 @@ fi
 
 rm -rf "$DEST"
 mkdir -p "$DEST"
-cp -R "$SRC/index.ts" "$SRC/lib" "$SRC/profiles" "$DEST/"
+cp -R "$SRC/index.ts" "$SRC/lib" "$SRC/profiles" "$SRC/README.md" "$SRC/docs" "$DEST/"
+# README.md and docs/ ride along so anyone reading the Personal Plugins checkout
+# can see what the plugin does. They are inert to Amp's plugin loader.
 
 cd "$REPO"
 git add -A
