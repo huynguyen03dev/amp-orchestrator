@@ -177,10 +177,7 @@ const ROLES: RoleSpec[] = [
 		label: 'Lead',
 		short: 'Lead',
 		color: '#d97706',
-		// EXPERIMENT: no `extends`, so LEAD_PROMPT is the system prompt rather than
-		// agent instructions appended under the built-in 'high' prompt. Nine cold
-		// runs showed the profile never wins the routing decision while it is
-		// subordinate; this tests whether that hierarchy is the cause.
+		extends: 'high',
 		effort: 'max',
 		instructions: LEAD_PROMPT,
 		tools: {
