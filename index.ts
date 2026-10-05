@@ -45,6 +45,16 @@ import { AgentRegistry, type AgentRecord } from './lib/registry'
  * to re-grant a single tool; exclude only what the role must not have.
  */
 const ORCHESTRATOR_TOOLS = ['peer_spawn', 'lead_spawn', 'agent_inbox', 'agent_cancel'] as const
+
+/**
+ * Model a spawn tool uses when the caller omits one.
+ *
+ * Not simply the first model in the role's list. `lead: gemini` is behavioural, not
+ * aesthetic: on the same profile, task and mode config, gemini-3.8-flash spawned a
+ * Peer in 3 of 3 cold-thread runs while glm-5.3 managed 0 of 11 and deepseek-v4.1 0
+ * of 1. `peer: deepseek` keeps Peer work off the GPT quota.
+ */
+const ROLE_DEFAULT_MODEL: Record<string, string> = { lead: 'gemini', peer: 'deepseek' }
 /** Visible prefix on every orchestration mode, so they filter together. */
 const MODE_PREFIX = 'SLP/'
 
@@ -327,7 +337,7 @@ export default function (amp: PluginAPI) {
 		ctx: PluginToolContext,
 	): Promise<string> {
 		const roleModels = modelsFor(roleSlug)
-		const modelSlug = str(input, 'model') || roleModels[0]
+		const modelSlug = str(input, 'model') || ROLE_DEFAULT_MODEL[roleSlug] || roleModels[0]
 		const name = str(input, 'name')
 		const brief = str(input, 'brief')
 		const disposition = str(input, 'disposition') || (roleSlug === 'lead' ? 'Lead' : 'Engineer')
@@ -394,7 +404,7 @@ export default function (amp: PluginAPI) {
 				model: {
 					type: 'string',
 					enum: modelsFor('peer'),
-					description: `Model for the peer. One of: ${modelsFor('peer').join(', ')}. Defaults to "${modelsFor('peer')[0]}".`,
+					description: `Model for the peer. One of: ${modelsFor('peer').join(', ')}. Defaults to "${ROLE_DEFAULT_MODEL.peer}".`,
 				},
 			},
 			required: ['name', 'disposition', 'brief'],
@@ -420,7 +430,7 @@ export default function (amp: PluginAPI) {
 				model: {
 					type: 'string',
 					enum: modelsFor('lead'),
-					description: `Model for the new Lead. One of: ${modelsFor('lead').join(', ')}. Defaults to "${modelsFor('lead')[0]}".`,
+					description: `Model for the new Lead. One of: ${modelsFor('lead').join(', ')}. Defaults to "${ROLE_DEFAULT_MODEL.lead}".`,
 				},
 			},
 			required: ['name', 'brief'],
