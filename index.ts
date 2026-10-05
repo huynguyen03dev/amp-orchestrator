@@ -330,13 +330,9 @@ export default function (amp: PluginAPI) {
 		}
 
 		const thread = await agent.createThread({ parentThreadID: ctx.thread.id })
-		const header =
-			roleSlug === 'lead'
-				? `[lead ${name} · ${modelSlug}]`
-				: `[peer ${name} · ${disposition} · ${modelSlug}]`
 		await thread.appendUserMessage({
 			type: 'user-message',
-			content: `${header}\n\n${brief}`,
+			content: brief,
 		})
 		// The brief counts as this thread addressing the new agent, so its first
 		// settle reports back here.
