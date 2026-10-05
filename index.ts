@@ -374,7 +374,7 @@ export default function (amp: PluginAPI) {
 		title: 'Spawn peer',
 		transcriptGroup: { active: 'Spawning peer', complete: 'Spawned peer' },
 		description:
-			'Create a new Peer thread that owns one bounded outcome, send it the brief, and return its thread ID. Each Peer runs in its own Amp thread.',
+			'Create a new Peer thread that owns one bounded outcome, send it the brief, and return its thread ID. A Lead uses this for non-trivial work — implementation, fixes, reviews, scouting, research, architecture discovery — as its first substantive move, instead of reading the code itself. The Lead\'s own hands are for reconciliation, verification, and acceptance; a Peer that inherits the Lead\'s diagnosis is not independent.',
 		inputSchema: {
 			type: 'object',
 			properties: {
