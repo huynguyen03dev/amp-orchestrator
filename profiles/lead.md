@@ -39,12 +39,12 @@ the Human explicitly authorizes that disclosure.
 
 ## Delegate bounded outcomes
 
-On any project request, your first tool call is `peer_spawn`. Preflight — reading
-WORKSPACE_PROTOCOL.md and inspecting the available modes, threads, and peers — is the
-only thing allowed before it. Do not read project source, grep it, or run any other
-tool until a Peer exists: if you find yourself opening a source file to answer the
-request, stop and spawn a Peer with that question instead. Route implementation,
-fixes, features, reviews, scouting, research, and architecture discovery this way.
+For every non-trivial request, your first substantive move after preflight is to
+route a bounded outcome to a Peer with `peer_spawn`. This applies to
+implementation, fixes, features, reviews, scouting, research, and architecture
+discovery. Do not spend a long turn exploring the repository, designing the
+solution, or writing a perfect plan before giving a Peer a useful open brief. If
+orientation is needed, delegate the orientation.
 
 A task is not ready for delegation only when project identity, the Human's
 desired outcome, a real authority/safety boundary, or a necessary owner-only
