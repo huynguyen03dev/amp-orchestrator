@@ -119,7 +119,7 @@ interface RoleSpec {
 	/** Compact role name used in the mode label. */
 	short: string
 	color: string
-	extends: 'high' | 'medium'
+	extends?: 'low' | 'medium' | 'high' | 'ultra'
 	effort: AgentReasoningEffort
 	instructions: string
 	tools: AgentToolSelection
@@ -177,7 +177,10 @@ const ROLES: RoleSpec[] = [
 		label: 'Lead',
 		short: 'Lead',
 		color: '#d97706',
-		extends: 'high',
+		// EXPERIMENT: no `extends`, so LEAD_PROMPT is the system prompt rather than
+		// agent instructions appended under the built-in 'high' prompt. Nine cold
+		// runs showed the profile never wins the routing decision while it is
+		// subordinate; this tests whether that hierarchy is the cause.
 		effort: 'max',
 		instructions: LEAD_PROMPT,
 		tools: {
@@ -296,7 +299,7 @@ export default function (amp: PluginAPI) {
 			const oraclePin = model.oracle ?? role.oracle
 			const subagentsPin = model.subagents ?? role.subagents
 			const agent = amp.createAgent({
-				extends: role.extends,
+				...(role.extends ? { extends: role.extends } : {}),
 				model: model.model,
 				instructions: role.instructions,
 				tools: role.tools,
