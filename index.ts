@@ -461,8 +461,12 @@ export default function (amp: PluginAPI) {
 		description:
 			'List every agent this thread spawned, with role, model, disposition, status, spawning thread, and the latest report.',
 		inputSchema: { type: 'object', properties: {} },
-		async execute() {
-			const records = registry.list()
+		async execute(_input, ctx) {
+			// A Lead sees the agents it routed work to. A Supervisor's mandate is
+			// cross-scope, so it sees every agent in the workspace.
+			const all = registry.list()
+			const role = await roleOf(ctx.thread)
+			const records = role === 'supervisor' ? all : all.filter((a) => a.spawnedBy === ctx.thread.id)
 			if (records.length === 0) return 'No agents yet.'
 			return records
 				.map((a) => {
