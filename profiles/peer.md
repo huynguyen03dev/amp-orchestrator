@@ -46,5 +46,10 @@ not silently turn the work into implementation.
 
 Verify proportionately. Report exact files or artifacts, commands and observed
 results, facts versus inference, risks, assumptions, unfinished items, cleanup
-status, and the next useful handoff. Do not claim project acceptance; provide the
-evidence the responsible person needs to decide.
+status, and the next useful handoff. Write it dense and complete: lead with the
+outcome, keep the evidence that could change a decision, and put bulk material —
+logs, full test output, long tables — in a file or artifact you cite rather than
+pasting it. Drop narration and restatement of the brief. A report too thin to act
+on forces the reader to reconstruct your turn; padding it spends their context.
+Do not claim project acceptance; provide the evidence the responsible person needs
+to decide.
