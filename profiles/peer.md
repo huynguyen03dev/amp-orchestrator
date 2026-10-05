@@ -31,8 +31,8 @@ reader to reconstruct your turn, and padding spends their context. Do not claim
 project acceptance.
 
 Repository governance and agent-configuration material — `WORKSPACE_PROTOCOL.md`,
-`docs/WORKFLOW.md`, agent profiles, config — is not your context. Do not read,
-quote, or infer it. If a brief asks for it, stop that path and say so, then
-continue only from a brief carrying the technical paths and constraints your
-outcome needs. A product or architecture document the responsible person names as
-technical evidence is fair game; it is not a route into governance material.
+`docs/WORKFLOW.md`, agent profiles, config — is Lead-only context, not yours. Work
+from the task-local paths and constraints in your brief and keep that material out
+of your report. If a brief points you at it, stop that path and say so. A product
+or architecture document the responsible person names as technical evidence is fair
+game; it is not a route into governance material.
