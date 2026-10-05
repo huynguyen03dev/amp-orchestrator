@@ -84,6 +84,18 @@ const LEAD_PROMPT = readProfile('lead')
 const PEER_PROMPT = readProfile('peer')
 const SUPERVISOR_PROMPT = readProfile('supervisor')
 
+/**
+ * The first line of each profile is its role sentinel. Amp exposes a thread's
+ * instructions but not its registered mode key, so this heading is the only stable
+ * identifier available: matching the whole text instead would stop recognising every
+ * already-running thread the moment a profile body is reworded.
+ */
+const ROLE_HEADINGS = [
+	['# Lead', 'lead'],
+	['# Peer', 'peer'],
+	['# Supervisor', 'supervisor'],
+] as const
+
 /** A model every role can be pinned to. Models must be served by a user connection. */
 interface ModelSpec {
 	slug: string
@@ -479,10 +491,20 @@ export default function (amp: PluginAPI) {
 			const agent = await thread.agent()
 			const instructions = (agent.definition as { instructions?: unknown }).instructions
 			if (typeof instructions === 'string') {
-				const trimmed = instructions.trim()
-				if (trimmed === LEAD_PROMPT) role = 'lead'
-				else if (trimmed === PEER_PROMPT) role = 'peer'
-				else if (trimmed === SUPERVISOR_PROMPT) role = 'supervisor'
+				const head = instructions.trimStart()
+				for (const [heading, slug] of ROLE_HEADINGS) {
+					if (head.startsWith(heading)) {
+						role = slug
+						break
+					}
+				}
+				if (role === null) {
+					// Backstop for a profile whose sentinel heading was lost.
+					const trimmed = instructions.trim()
+					if (trimmed === LEAD_PROMPT) role = 'lead'
+					else if (trimmed === PEER_PROMPT) role = 'peer'
+					else if (trimmed === SUPERVISOR_PROMPT) role = 'supervisor'
+				}
 			}
 		} catch {
 			// Best effort: an unknown thread is simply not orchestrated.
