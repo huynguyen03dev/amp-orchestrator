@@ -224,18 +224,13 @@ function str(input: Record<string, unknown>, key: string): string {
 }
 
 /**
- * How much of an agent's final output is inlined into the notice its parent
- * receives. Reports are usually a few KB; the cap keeps one runaway report from
- * dominating the parent's context, and the thread URL stays as the escape hatch.
- */
-const REPORT_INLINE_LIMIT = 6000
-
-/**
  * The message appended to the thread that spawned an agent once that agent
  * settles.
  *
- * The agent's final output is inlined so the parent can act on the result
- * without reading the child thread first.
+ * The agent's closing output is inlined in full, deliberately: a truncated
+ * handback is incomplete evidence, so the recipient goes and reads the whole
+ * child thread instead — which costs far more context than the report itself.
+ * The URL is the thread link, not an escape hatch for content held back here.
  */
 function settledNotice(
 	record: AgentRecord,
@@ -243,14 +238,9 @@ function settledNotice(
 	report: string,
 	url: string,
 ): string {
-	const trimmed = report.trim()
-	const body =
-		trimmed.length > REPORT_INLINE_LIMIT
-			? `${trimmed.slice(0, REPORT_INLINE_LIMIT)}\n…(truncated — full report: ${url})`
-			: trimmed
 	return [
 		`[${record.role} ${record.name} · ${record.disposition} · ${record.model} · ${status}]`,
-		body || '(no text output this turn)',
+		report.trim() || '(no text output this turn)',
 		url,
 	].join('\n\n')
 }

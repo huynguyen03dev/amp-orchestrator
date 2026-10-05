@@ -126,8 +126,9 @@ known agent thread with `send_thread_message`. The settle consumes the
 registration, so later turns stay silent until someone addresses the thread again.
 
 The notice carries the agent's **closing text block** — the outcome it stated
-last, not the whole turn's narration — plus the thread URL as the escape hatch for
-the full transcript. Reports longer than 6,000 characters are truncated.
+last, not the whole turn's narration — plus the thread URL, in full. Nothing is
+truncated: a truncated handback is incomplete evidence, so the recipient would go
+and read the whole child thread, which costs far more context than the report.
 
 A human typing into a thread is not a tool call, so it never puts a thread on a
 reporting loop.
@@ -149,7 +150,6 @@ Also in `index.ts`:
 - `DISABLED_SUBAGENTS` — subagents no role may use (`painter`, `Task`), which keeps
   delegation explicit: a Lead routes to a Peer through `peer_spawn` rather than
   spinning up an ad-hoc `Task` subagent.
-- `REPORT_INLINE_LIMIT` — how much of a settled agent's output is inlined.
 
 After editing, run `plugins: reload`.
 
